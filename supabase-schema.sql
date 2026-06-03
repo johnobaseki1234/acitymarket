@@ -68,6 +68,14 @@ CREATE POLICY "allow_all" ON notifications FOR ALL USING (true) WITH CHECK (true
 CREATE POLICY "allow_all" ON requests      FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "allow_all" ON app_config    FOR ALL USING (true) WITH CHECK (true);
 
+-- ── ENABLE REALTIME ──
+-- Allows live updates via Supabase channels (Phase 5D)
+
+ALTER PUBLICATION supabase_realtime ADD TABLE vendors;
+ALTER PUBLICATION supabase_realtime ADD TABLE orders;
+ALTER PUBLICATION supabase_realtime ADD TABLE notifications;
+ALTER PUBLICATION supabase_realtime ADD TABLE requests;
+
 -- ── SEED CONFIG ──
 
 INSERT INTO app_config (key, value) VALUES ('order_counter', '0') ON CONFLICT (key) DO NOTHING;

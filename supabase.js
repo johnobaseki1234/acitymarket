@@ -52,6 +52,9 @@ async function loadAllData() {
         if (DB.vendors.length === 0) {
             await seedSampleVendors();
         }
+
+        // Start realtime after data is in cache
+        startRealtimeSubscriptions();
     } catch(e) {
         console.warn('loadAllData error:', e);
     }
@@ -160,6 +163,38 @@ async function syncConfig(key, value) {
         key, value: value == null ? '' : String(value),
         updated_at: new Date().toISOString()
     });
+}
+
+// ═══════════════════════════════════════════
+// REALTIME SUBSCRIPTIONS (Phase 5D)
+// Started after loadAllData() — handlers are defined in app.js
+// ═══════════════════════════════════════════
+function startRealtimeSubscriptions() {
+    if (!_supabase) return;
+
+    // Orders: vendor dashboard updates instantly on new/changed orders
+    _supabase.channel('acm-orders')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' },
+            payload => typeof handleOrderChange === 'function' && handleOrderChange(payload))
+        .subscribe();
+
+    // Notifications: badge + list updates instantly for all users
+    _supabase.channel('acm-notifications')
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notifications' },
+            payload => typeof handleNotificationInsert === 'function' && handleNotificationInsert(payload))
+        .subscribe();
+
+    // Vendors: homepage + vendor detail + stock counts update live
+    _supabase.channel('acm-vendors')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'vendors' },
+            payload => typeof handleVendorChange === 'function' && handleVendorChange(payload))
+        .subscribe();
+
+    // Requests: admin panel badge + requests tab update live
+    _supabase.channel('acm-requests')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'requests' },
+            payload => typeof handleRequestChange === 'function' && handleRequestChange(payload))
+        .subscribe();
 }
 
 // ── SAVE HELPERS WITH DIFF DETECTION ──

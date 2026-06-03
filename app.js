@@ -214,6 +214,122 @@ async function init() {
   }
 }
 
+// ═══════════════════════════════════════════
+// REALTIME HANDLERS (Phase 5D)
+// Called by Supabase channel subscriptions in supabase.js
+// ═══════════════════════════════════════════
+
+function handleOrderChange(payload) {
+    const row = payload.new || {};
+    const order = row.data;
+    const eventType = payload.eventType;
+
+    if (eventType === 'INSERT' && order) {
+        if (!DB.orders.find(o => o.id === order.id)) {
+            DB.orders.unshift(order);
+        }
+    } else if (eventType === 'UPDATE' && order) {
+        const idx = DB.orders.findIndex(o => o.id === order.id);
+        if (idx !== -1) DB.orders[idx] = order; else DB.orders.unshift(order);
+    } else if (eventType === 'DELETE') {
+        const delId = payload.old?.id;
+        if (delId) DB.orders = DB.orders.filter(o => o.id !== delId);
+    }
+
+    // If this order belongs to the logged-in vendor, refresh their dashboard
+    if (state.loggedVendor && order?.vendorId === state.loggedVendor.id) {
+        updateOrdersBadge();
+        const ordersTab = document.getElementById('vtab-orders');
+        if (ordersTab && !ordersTab.classList.contains('hidden')) {
+            renderVOrders();
+        }
+        // Toast alert for new incoming order
+        if (eventType === 'INSERT') {
+            showToast('New order received!');
+        }
+    }
+}
+
+function handleNotificationInsert(payload) {
+    const row = payload.new || {};
+    const notif = row.data;
+    if (!notif) return;
+
+    // Don't duplicate (we may have just added it ourselves)
+    if (DB.notifications.find(n => n.id === notif.id)) return;
+
+    DB.notifications.unshift({ ...notif, read: row.read || false });
+    updateNotifBadge();
+
+    // Refresh notification list if currently open
+    const notifPage = document.getElementById('page-notifications');
+    if (notifPage?.classList.contains('active')) {
+        renderNotifications();
+    }
+}
+
+function handleVendorChange(payload) {
+    const row = payload.new || {};
+    const vendor = row.data;
+    const eventType = payload.eventType;
+
+    if (eventType === 'DELETE') {
+        const delId = payload.old?.id;
+        if (delId) DB.vendors = DB.vendors.filter(v => v.id !== delId);
+    } else if (vendor) {
+        const idx = DB.vendors.findIndex(v => v.id === vendor.id);
+        if (idx !== -1) DB.vendors[idx] = vendor; else DB.vendors.push(vendor);
+
+        // Update logged vendor in state if it's the current vendor's own store
+        if (state.loggedVendor?.id === vendor.id) {
+            state.loggedVendor = vendor;
+        }
+
+        // Re-render vendor detail page if it's currently open for this vendor
+        const lastPage = safeGetJSON('acm_last_page', null);
+        if (lastPage?.page === 'vendor' && lastPage?.vendorId === vendor.id) {
+            const vendorPage = document.getElementById('page-vendor');
+            if (vendorPage?.classList.contains('active')) {
+                openVendor(vendor.id);
+            }
+        }
+    }
+
+    // Always refresh homepage so stock counts + vendor cards stay accurate
+    const homePage = document.getElementById('page-home');
+    if (homePage?.classList.contains('active')) {
+        renderHomePage();
+    }
+}
+
+function handleRequestChange(payload) {
+    const row = payload.new || {};
+    const req = row.data;
+    const eventType = payload.eventType;
+
+    if (eventType === 'INSERT' && req) {
+        if (!DB.requests.find(r => r.id === req.id)) {
+            DB.requests.unshift(req);
+        }
+    } else if (eventType === 'UPDATE' && req) {
+        const idx = DB.requests.findIndex(r => r.id === req.id);
+        if (idx !== -1) DB.requests[idx] = req; else DB.requests.unshift(req);
+    } else if (eventType === 'DELETE') {
+        const delId = payload.old?.id;
+        if (delId) DB.requests = DB.requests.filter(r => r.id !== delId);
+    }
+
+    updateAdminReqBadge();
+
+    // Refresh requests tab if admin panel is open and on requests tab
+    if (state.adminLoggedIn) {
+        const reqTab = document.getElementById('atab-requests');
+        if (reqTab && !reqTab.classList.contains('hidden')) {
+            renderAdminRequests();
+        }
+    }
+}
+
 // ── LOADING SCREEN ──
 function showLoadingScreen() {
     const el = document.getElementById('loadingScreen');
