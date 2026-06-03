@@ -3343,18 +3343,22 @@ function safeSetJSON(key, value) {
     }
 }
 
-function getVendors() { return DB.vendors; }
+function getVendors() { return [...DB.vendors]; } // returns a copy so push/mutations don't fool the diff
 function saveVendors(newVendors) {
-    const old = DB.vendors.slice();
+    const removedIds = DB.vendors
+        .filter(v => !newVendors.find(n => n.id === v.id))
+        .map(v => v.id);
     DB.vendors = newVendors;
-    _diffSync(newVendors, old, syncVendor, id => _supabase?.from('vendors').delete().eq('id', id));
+    // Always sync all — mutations on shared object references would be missed by a diff.
+    // After Phase 5E (images move to Storage), vendor objects are tiny so this is fast.
+    newVendors.forEach(v => syncVendor(v).catch(console.warn));
+    removedIds.forEach(id => _supabase?.from('vendors').delete().eq('id', id).catch(console.warn));
 }
 
-function getOrders() { return DB.orders; }
+function getOrders() { return [...DB.orders]; }
 function saveOrders(newOrders) {
-    const old = DB.orders.slice();
     DB.orders = newOrders;
-    _diffSync(newOrders, old, syncOrder, null);
+    newOrders.forEach(o => syncOrder(o).catch(console.warn));
 }
 // EC1.4 / EC2.6 — public view filters out suspended, pending-approval, AND auto-clears expired temp-closes
 function getPublicVendors() {
@@ -4747,11 +4751,14 @@ init();
 
 function getAdminCreds() { return safeGetJSON('acm_admin_creds', null); }
 
-function getRequests() { return DB.requests; }
+function getRequests() { return [...DB.requests]; }
 function saveRequests(newRequests) {
-    const old = DB.requests.slice();
+    const removedIds = DB.requests
+        .filter(r => !newRequests.find(n => n.id === r.id))
+        .map(r => r.id);
     DB.requests = newRequests;
-    _diffSync(newRequests, old, syncRequest, deleteRequestFromDB);
+    newRequests.forEach(r => syncRequest(r).catch(console.warn));
+    removedIds.forEach(id => deleteRequestFromDB(id).catch(console.warn));
 }
 
 // ── ADMIN LOGIN / LOGOUT ──
