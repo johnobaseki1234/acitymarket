@@ -490,7 +490,7 @@ function renderTrendingProducts(vendors, orderMap) {
 
     scroll.innerHTML = top.map(({ product: p, vendor: v }) => {
         const img = p.image
-            ? `<img src="${p.image}" alt="${escHtml(p.name)}">`
+            ? `<img src="${p.image}" alt="${escHtml(p.name)}" onerror="this.style.display='none'">`
             : `<span style="font-size:32px;">${v.emoji || '🛍️'}</span>`;
         return `<div class="trending-product-card" onclick="openVendor('${v.id}')">
             <div class="trending-product-img">${img}</div>
@@ -600,7 +600,7 @@ function vendorCardHTML(v, campusStarId = null) {
     const stars = v.reviews > 0 ? renderStars(v.rating, 12) : '';
     const levelText = v.level && v.level !== 'Alumni' ? ' · Lvl ' + v.level : '';
     const imgContent = v.logo
-        ? `<img src="${v.logo}" style="width:100%;height:100%;object-fit:cover;">`
+        ? `<img src="${v.logo}" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display='none'">`
         : v.emoji;
     const isStar = campusStarId && v.id === campusStarId;
     const badgeHTML = isStar
@@ -698,7 +698,7 @@ function openVendor(vendorId) {
     document.getElementById('vendorDetailTitle').textContent = v.name;
     document.getElementById('vendorDetailContent').innerHTML = `
         <div class="vendor-detail-hero">
-            <div class="vendor-detail-avatar">${v.logo ? `<img src="${v.logo}" style="width:100%;height:100%;object-fit:cover;border-radius:inherit;">` : v.emoji}</div>
+            <div class="vendor-detail-avatar">${v.logo ? `<img src="${v.logo}" style="width:100%;height:100%;object-fit:cover;border-radius:inherit;" onerror="this.style.display='none'">` : v.emoji}</div>
             <div class="vendor-detail-info">
                 ${isCampusStar ? `<div style="display:inline-flex;align-items:center;gap:6px;background:linear-gradient(135deg,#b8860b,#ffd700);color:#3d2800;font-size:11px;font-weight:800;padding:3px 10px;border-radius:20px;margin-bottom:6px;box-shadow:0 1px 4px rgba(180,130,0,0.35);letter-spacing:0.3px;">Campus Star <span onclick="event.stopPropagation();showToast('Campus Star is automatically awarded to the #1 vendor by fulfilled orders with a 4.5★+ rating. No votes, no payments — purely earned.')" style="cursor:pointer;font-size:13px;font-weight:700;opacity:0.7;" title="What is Campus Star?">ⓘ</span></div>` : ''}
                 <h2>${escHtml(v.name)}</h2>
@@ -955,7 +955,7 @@ function renderCart() {
         const itemsHTML = g.items.map(i => {
             const itemKey = i.cartItemId || i.productId;
             const thumb = i.photo
-                ? `<img src="${i.photo}" style="width:40px;height:40px;border-radius:8px;object-fit:cover;flex-shrink:0;">`
+                ? `<img src="${i.photo}" style="width:40px;height:40px;border-radius:8px;object-fit:cover;flex-shrink:0;" onerror="this.style.display='none'">`
                 : `<span style="font-size:26px;">${i.emoji}</span>`;
             const variantLabel = i.variant ? `<div style="font-size:12px;color:var(--text-muted);">${[i.variant.color, i.variant.size].filter(Boolean).join(' · ')}</div>` : '';
             const preorderTag = i.isPreorder ? `<span class="preorder-badge">Pre-order</span>` : '';
@@ -1427,7 +1427,7 @@ function announcementCardHTML(a, showDelete = false) {
     const tagSVG       = `<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>`;
 
     const visualHTML = a.photo
-        ? `<div class="feed-visual"><img src="${a.photo}" onclick="openPostDetail('${a.id}')"></div>`
+        ? `<div class="feed-visual"><img src="${a.photo}" onclick="openPostDetail('${a.id}')" onerror="this.parentElement.style.display='none'"></div>`
         : `<div class="feed-visual"><div class="feed-icon-placeholder">${isJob ? briefcaseSVG : tagSVG}</div></div>`;
 
     const userSVG  = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>`;
@@ -1507,12 +1507,13 @@ async function postAnnouncement() {
 
     const photoFile = document.getElementById('announcPhoto').files[0];
     let photo = null;
-    if (photoFile) {
-        try { photo = await compressImage(photoFile, 900, 0.78); }
-        catch(e) { showToastError(e.message); return; }
-    }
-
     const id = 'a' + Date.now();
+    if (photoFile) {
+        try {
+            const dataUrl = await compressImage(photoFile, 900, 0.78);
+            photo = await uploadImage(dataUrl, 'posts', id) || dataUrl;
+        } catch(e) { showToastError(e.message); return; }
+    }
     const newAnn = { id, title, desc, contact, tags, photo, date: new Date().toISOString() };
     DB.announcements.unshift(newAnn);
     syncAnnouncement(newAnn).catch(console.warn);
@@ -1553,7 +1554,7 @@ function openPostDetail(id) {
         : '';
 
     document.getElementById('postDetailContent').innerHTML = `
-        ${a.photo ? `<img src="${a.photo}" style="width:100%;border-radius:12px;max-height:260px;object-fit:cover;margin-bottom:16px;">` : ''}
+        ${a.photo ? `<img src="${a.photo}" style="width:100%;border-radius:12px;max-height:260px;object-fit:cover;margin-bottom:16px;" onerror="this.style.display='none'">` : ''}
         <h2 style="font-size:18px;margin-bottom:4px;">${escHtml(a.title)}</h2>
         ${tagsHTML}
         ${a.desc ? `<p style="font-size:14px;color:var(--text-muted);margin:12px 0;line-height:1.6;">${escHtml(a.desc)}</p>` : ''}
@@ -1814,7 +1815,7 @@ function applyFilters(searchQuery) {
         html += `<div class="search-category-header">Products (${matchedProducts.length})</div>`;
         html += matchedProducts.slice(0, 8).map(({ product: p, vendor: v }) => {
             const img = p.image
-                ? `<img src="${p.image}" alt="${escHtml(p.name)}" style="width:100%;height:100%;object-fit:cover;">`
+                ? `<img src="${p.image}" alt="${escHtml(p.name)}" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display='none'">`
                 : `<span style="font-size:22px;">${v.emoji || '🛍️'}</span>`;
             return `<div class="search-result-product-row" onclick="openVendor('${v.id}')">
                 <div class="search-result-thumb">${img}</div>
@@ -2094,7 +2095,7 @@ function renderVSummary() {
 
     const levelLabel = v.level && v.level !== 'Alumni' ? 'Level ' + v.level : 'Alumni';
     const avatarHTML = v.logo
-        ? `<img src="${v.logo}" style="width:100%;height:100%;object-fit:cover;">`
+        ? `<img src="${v.logo}" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display='none'">`
         : v.emoji || '🏪';
 
     // EC2.6 — show temp-close expiry if active
@@ -2472,9 +2473,9 @@ async function submitVendorRegister() {
 
     // SP1.2 — compress images before storing
     const logoFile = document.getElementById('vr-logo').files[0];
-    let logo = null;
+    let logoDataUrl = null;
     if (logoFile) {
-        try { logo = await compressImage(logoFile, 400, 0.75); }
+        try { logoDataUrl = await compressImage(logoFile, 400, 0.75); }
         catch(e) { showToastError(e.message); return; }
     }
 
@@ -2497,6 +2498,10 @@ async function submitVendorRegister() {
         return;
     }
     const vendorId = authData.user.id;
+    let logo = null;
+    if (logoDataUrl) {
+        logo = await uploadImage(logoDataUrl, 'logos', vendorId) || logoDataUrl;
+    }
     // Update Supabase metadata with the confirmed vendor ID
     await _supabase.auth.updateUser({ data: { role: 'vendor', vendorId } });
 
@@ -2894,7 +2899,7 @@ function renderVProducts() {
     }
     listEl.innerHTML = products.map(p => {
         const thumb = p.photo
-            ? `<img src="${p.photo}" style="width:48px;height:48px;object-fit:cover;border-radius:8px;flex-shrink:0;">`
+            ? `<img src="${p.photo}" style="width:48px;height:48px;object-fit:cover;border-radius:8px;flex-shrink:0;" onerror="this.style.display='none'">`
             : `<div style="width:48px;height:48px;border-radius:8px;background:var(--bg-light);display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0;">${p.emoji || '📦'}</div>`;
         const priceLabel = p.isConsult ? '<em style="color:var(--text-muted);">Contact for Pricing</em>' : `<strong>GH₵${p.price}</strong>`;
         const stockLabel = p.isConsult ? '' : (p.stock < 3
@@ -3006,12 +3011,21 @@ async function saveVendorProduct() {
         if (vIdx === -1) { showToast('Vendor not found — please log in again'); return; }
         if (!vendors[vIdx].products) vendors[vIdx].products = [];
 
+        const _targetProductId = vendorEditProductId || ('p' + Date.now());
+        const uploadedPhotos = await Promise.all(pendingPhotos.map(async (ph, i) => {
+            if (typeof ph === 'string' && ph.startsWith('data:')) {
+                const url = await uploadImage(ph, 'products', `${state.loggedVendor.id}_${_targetProductId}_${i}`);
+                return url || ph;
+            }
+            return ph;
+        }));
+
         const productData = {
             name, description: desc, emoji, isConsult,
             price: isConsult ? 0 : Number(priceRaw),
             stock: isConsult ? 99 : Number(stockRaw),
-            photos: [...pendingPhotos],
-            photo: pendingPhotos[0] || null,
+            photos: uploadedPhotos,
+            photo: uploadedPhotos[0] || null,
             sectionId: sectionId || null,
             isNegotiable: !!isNegotiable,
             variants: {
@@ -3463,7 +3477,7 @@ function renderWishlistPage() {
 
     const wlHTML = wl.length ? wl.map(w => {
         const thumb = w.photo
-            ? `<img src="${w.photo}" style="width:100%;height:100%;object-fit:cover;">`
+            ? `<img src="${w.photo}" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display='none'">`
             : w.emoji;
         const priceLabel = w.price ? `GH₵ ${w.price}` : 'Contact for pricing';
         return `
@@ -3484,7 +3498,7 @@ function renderWishlistPage() {
     const followedVendors = follows.map(f => vendors.find(v => v.id === f.vendorId)).filter(Boolean);
     const followHTML = followedVendors.length ? followedVendors.map(v => {
         const img = v.logo
-            ? `<img src="${v.logo}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">`
+            ? `<img src="${v.logo}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;" onerror="this.style.display='none'">`
             : `<span style="font-size:26px;">${v.emoji}</span>`;
         return `
         <div style="display:flex;align-items:center;gap:12px;background:var(--white);border-radius:var(--radius);padding:12px;margin-bottom:10px;box-shadow:var(--shadow);">
@@ -3578,7 +3592,7 @@ function showRVDropdown() {
     dropdown.innerHTML = `<div class="rv-dropdown-label">RECENTLY VIEWED</div>` +
         items.map(v => {
             const img = v.logo
-                ? `<img src="${v.logo}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">`
+                ? `<img src="${v.logo}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;" onerror="this.style.display='none'">`
                 : `<span style="font-size:18px;">${v.emoji}</span>`;
             return `<div class="rv-dropdown-item" onmousedown="openVendor('${v.id}')">
                 <div class="rv-dropdown-icon">${img}</div>
@@ -3711,7 +3725,7 @@ function productCardHTML(v, p) {
     const lowStock = !isConsult && !oos && p.stock < 3;
     const photos = getProductPhotos(p);
     const imgContent = photos.length
-        ? `<img src="${photos[0]}" style="width:100%;height:100%;object-fit:cover;">`
+        ? `<img src="${photos[0]}" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display='none'">`
         : p.emoji;
     const wishlisted = isWishlisted(p.id);
     const wishBtn = !isConsult ? `<button class="wish-btn ${wishlisted ? 'wishlisted' : ''}" data-pid="${p.id}" onclick="event.stopPropagation();toggleWishlist('${v.id}','${p.id}')">♥</button>` : '';
@@ -4570,7 +4584,7 @@ function getRecommendationsHTML(category, currentVendorId) {
     const cards = picks.map(({ v, p }) => {
         const photos = getProductPhotos(p);
         const imgHTML = photos[0]
-            ? `<img src="${photos[0]}" style="width:100%;aspect-ratio:1/1;object-fit:cover;">`
+            ? `<img src="${photos[0]}" style="width:100%;aspect-ratio:1/1;object-fit:cover;" onerror="this.style.display='none'">`
             : `<div style="width:100%;aspect-ratio:1/1;background:linear-gradient(135deg,#e8eaf6,#fce4ec);display:flex;align-items:center;justify-content:center;font-size:28px;">${p.emoji || '📦'}</div>`;
         return `
             <div onclick="showPage('product');renderProductPage('${v.id}','${p.id}')" style="background:var(--white);border-radius:10px;overflow:hidden;box-shadow:var(--shadow);cursor:pointer;">
@@ -5308,7 +5322,7 @@ function renderAdminAnalytics() {
         <div style="margin-bottom:20px;">
             <div style="font-size:13px;font-weight:700;color:var(--text-muted);margin-bottom:10px;letter-spacing:0.5px;">🏆 VENDOR OF THE WEEK</div>
             <div style="background:white;border-radius:var(--radius);padding:14px;box-shadow:var(--shadow);display:flex;align-items:center;gap:12px;">
-                <div style="font-size:32px;">${votw.logo ? `<img src="${votw.logo}" style="width:44px;height:44px;border-radius:50%;object-fit:cover;">` : votw.emoji}</div>
+                <div style="font-size:32px;">${votw.logo ? `<img src="${votw.logo}" style="width:44px;height:44px;border-radius:50%;object-fit:cover;" onerror="this.style.display='none'">` : votw.emoji}</div>
                 <div>
                     <div style="font-weight:700;font-size:15px;">${escHtml(votw.name)}</div>
                     <div style="font-size:12px;color:var(--text-muted);">⭐ ${votw.rating} · ${votw.reviews} reviews · Score: ${(votw.rating * votw.reviews).toFixed(0)}</div>

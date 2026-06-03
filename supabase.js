@@ -55,6 +55,9 @@ async function loadAllData() {
 
         // Start realtime after data is in cache
         startRealtimeSubscriptions();
+
+        // Migrate any remaining base64 images to Storage in background
+        migrateImagesToStorage().catch(console.warn);
     } catch(e) {
         console.warn('loadAllData error:', e);
     }
@@ -199,6 +202,75 @@ function startRealtimeSubscriptions() {
 
 // ── SAVE HELPERS WITH DIFF DETECTION ──
 // Only syncs rows that actually changed — avoids upserting everything on every save.
+
+// ═══════════════════════════════════════════
+// SUPABASE STORAGE — IMAGE UPLOAD & MIGRATION
+// ═══════════════════════════════════════════
+
+async function ensureStorageBucket() {
+    if (!_supabase) return;
+    await _supabase.storage.createBucket('acm-images', { public: true }).catch(() => {});
+}
+
+// Upload a base64 dataURL to Supabase Storage. Returns public URL or null on failure.
+async function uploadImage(dataUrl, folder, filename) {
+    if (!_supabase || !dataUrl) return null;
+    try {
+        const res = await fetch(dataUrl);
+        const blob = await res.blob();
+        const ext = blob.type === 'image/png' ? 'png' : 'jpg';
+        const path = `${folder}/${filename || Date.now()}.${ext}`;
+        const { error } = await _supabase.storage.from('acm-images').upload(path, blob, { upsert: true });
+        if (error) { console.warn('uploadImage storage error:', error); return null; }
+        const { data } = _supabase.storage.from('acm-images').getPublicUrl(path);
+        return data.publicUrl || null;
+    } catch(e) {
+        console.warn('uploadImage error:', e);
+        return null;
+    }
+}
+
+// Migrate existing base64 images in DB to Supabase Storage (runs once in background on load).
+async function migrateImagesToStorage() {
+    if (!_supabase) return;
+    await ensureStorageBucket();
+
+    // Vendors: logos + product photos
+    const vendors = DB.vendors;
+    for (const v of vendors) {
+        let dirty = false;
+
+        if (v.logo && v.logo.startsWith('data:')) {
+            const url = await uploadImage(v.logo, 'logos', v.id);
+            if (url) { v.logo = url; dirty = true; }
+        }
+
+        for (const p of (v.products || [])) {
+            if (p.photos && p.photos.length) {
+                for (let i = 0; i < p.photos.length; i++) {
+                    if (p.photos[i] && p.photos[i].startsWith('data:')) {
+                        const url = await uploadImage(p.photos[i], 'products', `${v.id}_${p.id}_${i}`);
+                        if (url) { p.photos[i] = url; dirty = true; }
+                    }
+                }
+                if (dirty) p.photo = p.photos[0];
+            } else if (p.photo && p.photo.startsWith('data:')) {
+                const url = await uploadImage(p.photo, 'products', `${v.id}_${p.id}_0`);
+                if (url) { p.photo = url; p.photos = [url]; dirty = true; }
+            }
+        }
+
+        if (dirty) await syncVendor(v).catch(console.warn);
+    }
+
+    // Announcements + posts
+    for (const a of DB.announcements) {
+        if (a.photo && a.photo.startsWith('data:')) {
+            const url = await uploadImage(a.photo, 'posts', a.id);
+            if (url) { a.photo = url; await syncAnnouncement(a).catch(console.warn); }
+        }
+    }
+}
 
 function _diffSync(newArr, oldArr, syncFn, deleteFn, idKey = 'id') {
     // Upsert changed/new items
