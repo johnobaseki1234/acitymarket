@@ -160,11 +160,6 @@ function init() {
         ]);
     }
 
-    // Seed default admin credentials if none exist yet
-    if (!localStorage.getItem('acm_admin_creds')) {
-        safeSetJSON('acm_admin_creds', { username: 'John', password: '123456' });
-    }
-
     // Restore signed-in customer
     const savedUser = safeGetJSON('acm_user', null);
     if (savedUser) {
@@ -176,12 +171,6 @@ function init() {
             state.currentUser = savedUser; // backward compat
         }
         updateSigninBtn();
-    }
-
-    const vendorSession = localStorage.getItem('acm_vendor_session');
-    if (vendorSession) {
-        const v = getVendors().find(x => x.id === vendorSession);
-        if (v) state.loggedVendor = v;
     }
 
     state.cart = safeGetJSON('acm_cart', []);
@@ -214,6 +203,9 @@ function init() {
         setTimeout(() => openAdminLogin(), 400);
     }
 
+    // Restore Supabase auth session (vendor or admin logged in on previous visit)
+    restoreSupabaseSession();
+
     // SP3.2 — scroll listener guarded so it only attaches once
     // (prevents duplicate listeners if init() is ever called again, e.g. after data restore)
     if (!window._acmScrollListenerAttached) {
@@ -232,6 +224,38 @@ function init() {
         <button onclick="location.reload()" style="background:#1e3a5f;color:white;border:none;padding:12px 24px;border-radius:10px;font-size:15px;cursor:pointer;">Reload</button>
     </div>`;
   }
+}
+
+// ── SUPABASE SESSION RESTORE ──
+// Runs async after init() — restores vendor or admin session from Supabase Auth.
+async function restoreSupabaseSession() {
+    if (!_supabase) return;
+    try {
+        const { data: { session } } = await _supabase.auth.getSession();
+        if (!session) return;
+        const meta = session.user.user_metadata || {};
+        if (meta.role === 'admin') {
+            state.adminLoggedIn = true;
+            // Don't auto-open admin panel on restore — just mark as logged in
+        } else if (meta.role === 'vendor') {
+            const vendors = getVendors();
+            const v = vendors.find(x => x.id === session.user.id);
+            if (v) {
+                state.loggedVendor = v;
+                renderMyStorePage();
+            }
+        }
+        // Listen for sign-out events (e.g. session expired)
+        _supabase.auth.onAuthStateChange((event) => {
+            if (event === 'SIGNED_OUT') {
+                state.loggedVendor = null;
+                state.adminLoggedIn = false;
+                renderMyStorePage();
+            }
+        });
+    } catch(e) {
+        console.warn('Supabase session restore failed:', e);
+    }
 }
 
 // ═══════════════════════════════════════════
@@ -2290,15 +2314,16 @@ async function submitVendorRegister() {
     const policyRefund  = document.getElementById('vr-policy-refund').value.trim();
     const policyCutoff  = document.getElementById('vr-policy-cutoff').value.trim();
     const policyNotes   = document.getElementById('vr-policy-notes').value.trim();
-    const username      = document.getElementById('vr-username').value.trim();
+    const email         = document.getElementById('vr-email').value.trim().toLowerCase();
     const password      = document.getElementById('vr-password').value;
     const confirm       = document.getElementById('vr-confirm').value;
 
-    if (!storeName || !desc || !category || !studentName || !username || !password) {
+    if (!storeName || !desc || !category || !studentName || !email || !password) {
         showToast('Please fill in all required fields'); return;
     }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { showToast('Please enter a valid email address'); return; }
     if (password !== confirm) { showToast('Passwords do not match'); return; }
-    if (password.length < 4)  { showToast('Password must be at least 4 characters'); return; }
+    if (password.length < 6)  { showToast('Password must be at least 6 characters'); return; }
 
     const pickupLabel = getPickupLabel();
     if (!pickupLabel) { showToast('Please set your pickup location'); return; }
@@ -2306,13 +2331,10 @@ async function submitVendorRegister() {
     const idPhotoFile = document.getElementById('vr-idPhoto').files[0];
     if (!idPhotoFile) { showToast('Please upload your Student ID photo'); return; }
 
-    const creds = safeGetJSON('acm_vendor_creds', []);
-    if (creds.some(c => c.username.toLowerCase() === username.toLowerCase())) {
-        showToast('Username already taken — choose another'); return;
-    }
     if (getVendors().some(v => v.name.toLowerCase() === storeName.toLowerCase())) {
         showToast('A store with this name already exists'); return;
     }
+    if (!_supabase) { showToastError('Cannot register: app is not connected to the server. Please try again later.'); return; }
 
     // SP1.2 — compress images before storing
     const logoFile = document.getElementById('vr-logo').files[0];
@@ -2326,8 +2348,26 @@ async function submitVendorRegister() {
     try { idPhoto = await compressImage(idPhotoFile, 1000, 0.8); }
     catch(e) { showToastError(e.message); return; }
 
+    // Register with Supabase Auth first — this handles email uniqueness and secure password storage
+    const { data: authData, error: authError } = await _supabase.auth.signUp({
+        email,
+        password,
+        options: { data: { role: 'vendor', storeName } }
+    });
+    if (authError) {
+        if (authError.message.includes('already registered')) {
+            showToastError('That email is already registered — please sign in instead.');
+        } else {
+            showToastError('Registration failed: ' + authError.message);
+        }
+        return;
+    }
+    const vendorId = authData.user.id;
+    // Update Supabase metadata with the confirmed vendor ID
+    await _supabase.auth.updateUser({ data: { role: 'vendor', vendorId } });
+
     const newVendor = {
-        id: 'v' + Date.now(),
+        id: vendorId,
         name: storeName, studentName, category, description: desc,
         emoji, logo, level,
         rating: 0, reviews: 0,
@@ -2352,15 +2392,9 @@ async function submitVendorRegister() {
     vendors.push(newVendor);
     saveVendors(vendors);
 
-    // SP1.1 — hash password before storing
-    const hashedPw = await hashPassword(password);
-    creds.push({ vendorId: newVendor.id, username, password: hashedPw });
-    safeSetJSON('acm_vendor_creds', creds);
-
     // EC1.4 — notify the vendor their registration is under review (NOT campus-wide)
     addNotification('🏪', 'Registration Received!', `Your store "${storeName}" is now under review. You'll be notified as soon as admin approves it.`, null, null, newVendor.id);
 
-    localStorage.setItem('acm_vendor_session', newVendor.id);
     state.loggedVendor = newVendor;
 
     closeModal('vendorRegisterModal');
@@ -2375,38 +2409,26 @@ function openVendorLogin() {
 }
 
 async function submitVendorLogin() {
-    const username = document.getElementById('vl-username').value.trim();
+    const email    = document.getElementById('vl-email').value.trim().toLowerCase();
     const password = document.getElementById('vl-password').value;
-    if (!username || !password) { showToast('Enter your username and password'); return; }
+    if (!email || !password) { showToast('Enter your email and password'); return; }
+    if (!_supabase) { showToastError('Cannot sign in: app is not connected to the server.'); return; }
 
-    const creds = safeGetJSON('acm_vendor_creds', []);
-    const cred = creds.find(c => c.username.toLowerCase() === username.toLowerCase());
-    if (!cred) { showToastError('Incorrect username or password'); return; }
+    const { data, error } = await _supabase.auth.signInWithPassword({ email, password });
+    if (error) { showToastError('Incorrect email or password'); return; }
 
-    // SP1.1 — compare hashed or plain-text password (migrate if plain-text)
-    let ok = false;
-    if (isHashed(cred.password)) {
-        ok = (await hashPassword(password)) === cred.password;
-    } else {
-        ok = password === cred.password;
-        if (ok) {
-            cred.password = await hashPassword(password);
-            safeSetJSON('acm_vendor_creds', creds);
-        }
-    }
-    const match = ok ? cred : null;
-    if (!match) { showToastError('Incorrect username or password'); return; }
+    const meta = data.user.user_metadata || {};
+    if (meta.role === 'admin') { showToastError('Use the admin login instead.'); await _supabase.auth.signOut(); return; }
 
     const vendors = getVendors();
-    const vendor = vendors.find(v => v.id === match.vendorId);
-    if (!vendor) { showToast('Store not found — please register'); return; }
+    const vendor = vendors.find(v => v.id === data.user.id);
+    if (!vendor) { showToast('Store not found — please register'); await _supabase.auth.signOut(); return; }
 
     vendor.lastActive = Date.now();
     saveVendors(vendors);
-    localStorage.setItem('acm_vendor_session', vendor.id);
     state.loggedVendor = vendor;
 
-    document.getElementById('vl-username').value = '';
+    document.getElementById('vl-email').value = '';
     document.getElementById('vl-password').value = '';
     closeModal('vendorLoginModal');
     showToast('Welcome back, ' + vendor.name + '!');
@@ -2414,9 +2436,9 @@ async function submitVendorLogin() {
 }
 
 // ── VENDOR LOGOUT ──
-function vendorLogout() {
+async function vendorLogout() {
     if (!confirm('Log out of your store?')) return;
-    localStorage.removeItem('acm_vendor_session');
+    if (_supabase) await _supabase.auth.signOut();
     state.loggedVendor = null;
     renderMyStorePage();
     showToast('Logged out of your store');
@@ -4586,11 +4608,6 @@ function saveRequests(r) { safeSetJSON('acm_requests', r); }
 // ── ADMIN LOGIN / LOGOUT ──
 function openAdminLogin() {
     if (state.adminLoggedIn) { showPage('admin'); switchATab('vendors'); return; }
-    // SP1.3 — if no admin account has been created yet, show first-run setup
-    if (!localStorage.getItem('acm_admin_creds')) {
-        document.getElementById('adminSetupModal').classList.remove('hidden');
-        return;
-    }
     document.getElementById('adminUser').value = '';
     document.getElementById('adminPass').value = '';
     document.getElementById('adminLoginModal').classList.remove('hidden');
@@ -4598,48 +4615,49 @@ function openAdminLogin() {
 }
 
 async function submitAdminLogin() {
-    const u = document.getElementById('adminUser').value.trim();
-    const p = document.getElementById('adminPass').value;
-    const creds = getAdminCreds();
-    if (!creds) { showToast('No admin account set up yet'); return; }
-    if (u !== creds.username) { showToastError('Incorrect username or password'); return; }
-    // SP1.1 — support both plain-text (legacy) and hashed passwords
-    let match = false;
-    if (isHashed(creds.password)) {
-        match = (await hashPassword(p)) === creds.password;
-    } else {
-        match = p === creds.password;
-        if (match) {
-            // Migrate plain-text password to hash on first successful login
-            const hashed = await hashPassword(p);
-            localStorage.setItem('acm_admin_creds', JSON.stringify({ username: creds.username, password: hashed }));
-        }
+    const email = document.getElementById('adminUser').value.trim().toLowerCase();
+    const p     = document.getElementById('adminPass').value;
+    if (!email || !p) { showToast('Enter your email and password'); return; }
+    if (!_supabase) { showToastError('Cannot sign in: app is not connected to the server.'); return; }
+
+    const { data, error } = await _supabase.auth.signInWithPassword({ email, password: p });
+    if (error) { showToastError('Incorrect email or password'); return; }
+
+    const meta = data.user.user_metadata || {};
+    if (meta.role !== 'admin') {
+        showToastError('This account is not an admin account.');
+        await _supabase.auth.signOut();
+        return;
     }
-    if (match) {
-        state.adminLoggedIn = true;
-        closeModal('adminLoginModal');
-        showPage('admin');
-        switchATab('vendors');
-    } else {
-        showToastError('Incorrect username or password');
-    }
+    state.adminLoggedIn = true;
+    closeModal('adminLoginModal');
+    showPage('admin');
+    switchATab('vendors');
 }
 
-// SP1.3 — first-run admin account creation
+// First-run admin account creation — registers the admin in Supabase Auth
 async function submitAdminSetup() {
-    const username = document.getElementById('as-username').value.trim();
+    const email    = document.getElementById('as-username').value.trim().toLowerCase();
     const password = document.getElementById('as-password').value;
     const confirm  = document.getElementById('as-confirm').value;
-    if (!username || !password) { showToast('Please fill in all fields'); return; }
+    if (!email || !password) { showToast('Please fill in all fields'); return; }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { showToast('Please enter a valid email address'); return; }
     if (password.length < 6)    { showToast('Password must be at least 6 characters'); return; }
     if (password !== confirm)   { showToast('Passwords do not match'); return; }
-    const hashed = await hashPassword(password);
-    localStorage.setItem('acm_admin_creds', JSON.stringify({ username, password: hashed }));
+    if (!_supabase) { showToastError('Cannot create admin: app is not connected to the server.'); return; }
+
+    const { data, error } = await _supabase.auth.signUp({
+        email,
+        password,
+        options: { data: { role: 'admin' } }
+    });
+    if (error) { showToastError('Setup failed: ' + error.message); return; }
+
     closeModal('adminSetupModal');
     state.adminLoggedIn = true;
     showPage('admin');
     switchATab('vendors');
-    showToast('Admin account created. Go to Settings → Export Backup to save credentials for other devices.');
+    showToast('Admin account created! Save your email and password in a safe place.');
 }
 
 function exitAdmin() {
@@ -5239,19 +5257,23 @@ function importAllData(input) {
 }
 
 async function changeAdminPassword() {
-    const creds   = getAdminCreds();
     const current = document.getElementById('ap-current').value;
     const newPass = document.getElementById('ap-new').value;
     const confirm = document.getElementById('ap-confirm').value;
-    if (newPass.length < 4)  { showToast('New password must be at least 4 characters'); return; }
+    if (newPass.length < 6)  { showToast('New password must be at least 6 characters'); return; }
     if (newPass !== confirm)  { showToast('Passwords do not match'); return; }
-    // SP1.1 — compare against hashed or plain-text stored password
-    const storedOk = isHashed(creds.password)
-        ? (await hashPassword(current)) === creds.password
-        : current === creds.password;
-    if (!storedOk) { showToast('Current password is incorrect'); return; }
-    const hashed = await hashPassword(newPass);
-    localStorage.setItem('acm_admin_creds', JSON.stringify({ username: creds.username, password: hashed }));
+    if (!_supabase) { showToastError('Not connected to server.'); return; }
+
+    // Re-authenticate with current password first to verify identity
+    const { data: { session } } = await _supabase.auth.getSession();
+    if (!session) { showToast('Session expired — please log in again'); return; }
+    const { error: verifyErr } = await _supabase.auth.signInWithPassword({
+        email: session.user.email, password: current
+    });
+    if (verifyErr) { showToast('Current password is incorrect'); return; }
+
+    const { error } = await _supabase.auth.updateUser({ password: newPass });
+    if (error) { showToastError('Password update failed: ' + error.message); return; }
     showToast('Password updated successfully');
     document.getElementById('ap-current').value = '';
     document.getElementById('ap-new').value = '';
@@ -5271,22 +5293,10 @@ function openResetVendorPass(vendorId) {
 }
 
 async function confirmResetVendorPass() {
-    const vendorId = document.getElementById('rvp-vendorId').value;
-    const newPass  = document.getElementById('rvp-newPass').value;
-    const confirm  = document.getElementById('rvp-confirmPass').value;
-    if (newPass.length < 4)  { showToast('Password must be at least 4 characters'); return; }
-    if (newPass !== confirm)  { showToast('Passwords do not match'); return; }
-    const creds = safeGetJSON('acm_vendor_creds', []);
-    const vendors = getVendors();
-    const vendor = vendors.find(v => v.id === vendorId);
-    const cred = creds.find(c => c.vendorId === vendorId);
-    if (!cred) { showToast('Vendor credentials not found'); return; }
-    // SP1.1 — store hashed password
-    cred.password = await hashPassword(newPass);
-    safeSetJSON('acm_vendor_creds', creds);
-    if (vendor) addNotification('🔑', 'Password Reset', 'An admin has reset your login password. Contact admin if this was unexpected.', null, null, vendorId);
+    // Resetting another user's password requires a server-side function with Supabase's
+    // service role key — this will be enabled in a later phase when the backend is set up.
+    showToast('Password reset via admin panel coming in a future update. Ask the vendor to use "Forgot Password" when that feature is added.');
     closeModal('resetVendorPassModal');
-    showToast('Password reset successfully');
 }
 
 // ═══════════════════════════════════════════
@@ -5356,17 +5366,14 @@ function vregNext() {
 
     if (n === 5) {
         const idFile   = document.getElementById('vr-idPhoto').files[0];
-        const username = document.getElementById('vr-username').value.trim();
+        const email    = document.getElementById('vr-email').value.trim();
         const password = document.getElementById('vr-password').value;
         const confirm  = document.getElementById('vr-confirm').value;
         if (!idFile)              { showToast('Please upload your student ID photo'); return; }
-        if (!username)            { showToast('Please choose a username'); return; }
-        if (password.length < 4)  { showToast('Password must be at least 4 characters'); return; }
+        if (!email)               { showToast('Please enter your email address'); return; }
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { showToast('Please enter a valid email address'); return; }
+        if (password.length < 6)  { showToast('Password must be at least 6 characters'); return; }
         if (password !== confirm)  { showToast('Passwords do not match'); return; }
-        const creds = safeGetJSON('acm_vendor_creds', []);
-        if (creds.some(c => c.username.toLowerCase() === username.toLowerCase())) {
-            showToast('That username is already taken — choose another'); return;
-        }
     }
 
     if (n === VREG_TOTAL) {

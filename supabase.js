@@ -12,5 +12,5 @@ const _supabase = window.supabase
     ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
     : null;
 
-// Phase 5A: Supabase not yet wired into app logic.
-// This file is the connection point — all DB calls will go through _supabase.
+// Phase 5B: Supabase Auth is now active for vendor and admin login/register.
+// All auth calls go through _supabase.auth.*
