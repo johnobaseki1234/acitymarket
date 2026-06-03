@@ -140,25 +140,15 @@ const OB_TOTAL = 4;       // moved here from after init() to avoid TDZ crash
 // ═══════════════════════════════════════════
 // BOOT
 // ═══════════════════════════════════════════
-function init() {
+async function init() {
   try {
-    if (!localStorage.getItem('acm_vendors')) {
-        safeSetJSON('acm_vendors', SAMPLE_VENDORS);
-    }
-    if (!localStorage.getItem('acm_announcements')) {
-        safeSetJSON('acm_announcements', [
-            { id: 'a1', title: 'Selling MacBook Air M1 — Like New', desc: 'Only 6 months used. Battery 98%. GH₵ 4,500 firm.', contact: 'Kwesi', tags: ['Product'], date: new Date(Date.now() - 86400000).toISOString() },
-            { id: 'a2', title: 'Looking for iPhone 13 or 14', desc: 'Budget GH₵ 3,000. Must be in good condition.', contact: 'Efua', tags: ['Product'], date: new Date(Date.now() - 172800000).toISOString() },
-            { id: 'a3', title: 'Social Media Intern Needed', desc: 'Looking for someone to manage IG & TikTok. Flexible hours, stipend included.', contact: 'Nana Kojo · IG: @nanakojo_photos', tags: ['Internship', 'Job Alert'], date: new Date(Date.now() - 3600000).toISOString() },
-        ]);
-    }
-    if (!localStorage.getItem('acm_notifications')) {
-        safeSetJSON('acm_notifications', [
-            { id: 'n1', icon: '🏪', title: 'New vendor joined!', text: 'Fridge Vibes just joined ACity Market', time: '2h ago', read: false, route: { type: 'vendor', id: 'v4' } },
-            { id: 'n2', icon: '📦', title: 'New Product Drop', text: 'Selling MacBook Air M1 — Like New', time: '1d ago', read: false, route: { type: 'announcement', id: 'a1' } },
-            { id: 'n3', icon: '🏆', title: 'Vendor of the Week', text: "Bella's Beads & More is this week's top vendor!", time: '3d ago', read: true, route: { type: 'votw' } },
-        ]);
-    }
+    showLoadingScreen();
+
+    // Load all data from Supabase before rendering anything
+    await loadAllData();
+
+    // Restore Supabase auth session (vendor / admin)
+    await restoreSupabaseSession();
 
     // Restore signed-in customer
     const savedUser = safeGetJSON('acm_user', null);
@@ -184,6 +174,7 @@ function init() {
     }
     updateDarkModeIcon();
 
+    hideLoadingScreen();
     updateCartBadge();
     updateNotifBadge();
     updateAdminReqBadge();
@@ -203,9 +194,6 @@ function init() {
         setTimeout(() => openAdminLogin(), 400);
     }
 
-    // Restore Supabase auth session (vendor or admin logged in on previous visit)
-    restoreSupabaseSession();
-
     // SP3.2 — scroll listener guarded so it only attaches once
     // (prevents duplicate listeners if init() is ever called again, e.g. after data restore)
     if (!window._acmScrollListenerAttached) {
@@ -224,6 +212,16 @@ function init() {
         <button onclick="location.reload()" style="background:#1e3a5f;color:white;border:none;padding:12px 24px;border-radius:10px;font-size:15px;cursor:pointer;">Reload</button>
     </div>`;
   }
+}
+
+// ── LOADING SCREEN ──
+function showLoadingScreen() {
+    const el = document.getElementById('loadingScreen');
+    if (el) el.style.display = 'flex';
+}
+function hideLoadingScreen() {
+    const el = document.getElementById('loadingScreen');
+    if (el) el.style.display = 'none';
 }
 
 // ── SUPABASE SESSION RESTORE ──
@@ -1343,7 +1341,7 @@ function announcementCardHTML(a, showDelete = false) {
 
 function getAnnouncements() {
     const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
-    return safeGetJSON('acm_announcements', [])
+    return DB.announcements
         .filter(a => new Date(a.date).getTime() > cutoff)
         .sort((a, b) => new Date(b.date) - new Date(a.date));
 }
@@ -1399,9 +1397,9 @@ async function postAnnouncement() {
     }
 
     const id = 'a' + Date.now();
-    const all = safeGetJSON('acm_announcements', []);
-    all.unshift({ id, title, desc, contact, tags, photo, date: new Date().toISOString() });
-    safeSetJSON('acm_announcements', all);
+    const newAnn = { id, title, desc, contact, tags, photo, date: new Date().toISOString() };
+    DB.announcements.unshift(newAnn);
+    syncAnnouncement(newAnn).catch(console.warn);
 
     let icon = '📋', notifTitle = 'New Post';
     if (tags.includes('Internship'))        { icon = '🎓'; notifTitle = 'New Internship'; }
@@ -1420,16 +1418,15 @@ async function postAnnouncement() {
 }
 
 function deleteAnnouncement(id) {
-    let all = safeGetJSON('acm_announcements', []);
-    all = all.filter(a => a.id !== id);
-    safeSetJSON('acm_announcements', all);
+    DB.announcements = DB.announcements.filter(a => a.id !== id);
+    deleteAnnouncementFromDB(id).catch(console.warn);
     loadAllAnnouncements();
     renderRecentAnnouncements();
     showToast('Post removed');
 }
 
 function openPostDetail(id) {
-    const announcements = safeGetJSON('acm_announcements', []);
+    const announcements = DB.announcements;
     const a = announcements.find(x => x.id === id);
     if (!a) return;
 
@@ -1453,8 +1450,19 @@ function openPostDetail(id) {
 // ═══════════════════════════════════════════
 // NOTIFICATIONS
 // ═══════════════════════════════════════════
-function getNotifications()    { return safeGetJSON('acm_notifications', []); }
-function saveNotifications(n)  { safeSetJSON('acm_notifications', n); }
+function getNotifications() { return DB.notifications; }
+function saveNotifications(newNotifs) {
+    const old = DB.notifications.slice();
+    DB.notifications = newNotifs;
+    // Only sync read-state changes and new items (avoid mass upserts for deletions)
+    newNotifs.forEach(n => {
+        const o = old.find(x => x.id === n.id);
+        if (!o || o.read !== n.read) syncNotification(n).catch(console.warn);
+    });
+    // Delete removed notifications from DB
+    old.filter(o => !newNotifs.find(n => n.id === o.id))
+       .forEach(o => _supabase?.from('notifications').delete().eq('id', o.id).catch(console.warn));
+}
 
 // SU2.4 — switch active tab and re-render
 function switchNotifTab(tab) {
@@ -1539,15 +1547,24 @@ function handleNotifRoute(route) {
 }
 
 function addNotification(icon, title, text, route, forUser = null, forVendorId = null) {
-    const notifs = getNotifications();
-    notifs.unshift({ id: 'n' + Date.now(), icon, title, text, time: 'Just now', read: false, route: route || null, forUser, forVendorId });
-    saveNotifications(notifs);
+    const notif = { id: 'n' + Date.now(), icon, title, text, time: 'Just now', read: false, route: route || null, forUser, forVendorId };
+    DB.notifications.unshift(notif);
+    syncNotification(notif).catch(console.warn);
     updateNotifBadge();
 }
 
 function clearNotifications() {
     if (!confirm('Clear all notifications?')) return;
-    saveNotifications([]);
+    // Only clear notifications belonging to current user/vendor context
+    const toKeep = DB.notifications.filter(n => {
+        if (n.forUser && n.forUser === state.currentUser) return false;
+        if (n.forVendorId && state.loggedVendor && n.forVendorId === state.loggedVendor.id) return false;
+        if (!n.forUser && !n.forVendorId) return false; // global
+        return true; // keep others
+    });
+    const toDelete = DB.notifications.filter(n => !toKeep.find(k => k.id === n.id));
+    DB.notifications = toKeep;
+    toDelete.forEach(n => _supabase?.from('notifications').delete().eq('id', n.id).catch(console.warn));
     updateNotifBadge();
     renderNotifications();
 }
@@ -1637,7 +1654,7 @@ function applyFilters(searchQuery) {
     const status = (document.getElementById('statusFilter') || {}).value || 'all';
 
     const allVendors = getPublicVendors();
-    const announcements = safeGetJSON('acm_announcements', []);
+    const announcements = DB.announcements;
 
     // ── Vendors ──
     let matchedVendors = allVendors.filter(v =>
@@ -2261,8 +2278,9 @@ function openMyOrders() {
 }
 
 function getNextOrderNumber() {
-    const n = parseInt(localStorage.getItem('acm_order_counter') || '0') + 1;
-    localStorage.setItem('acm_order_counter', String(n));
+    const n = (DB.config.order_counter || 0) + 1;
+    DB.config.order_counter = n;
+    syncConfig('order_counter', n).catch(console.warn);
     return String(n).padStart(6, '0');
 }
 
@@ -3209,10 +3227,19 @@ function safeSetJSON(key, value) {
     }
 }
 
-function getVendors()    { return safeGetJSON('acm_vendors', []); }
-function saveVendors(v)  { safeSetJSON('acm_vendors', v); }
-function getOrders()     { return safeGetJSON('acm_orders', []); }
-function saveOrders(o)   { safeSetJSON('acm_orders', o); }
+function getVendors() { return DB.vendors; }
+function saveVendors(newVendors) {
+    const old = DB.vendors.slice();
+    DB.vendors = newVendors;
+    _diffSync(newVendors, old, syncVendor, id => _supabase?.from('vendors').delete().eq('id', id));
+}
+
+function getOrders() { return DB.orders; }
+function saveOrders(newOrders) {
+    const old = DB.orders.slice();
+    DB.orders = newOrders;
+    _diffSync(newOrders, old, syncOrder, null);
+}
 // EC1.4 / EC2.6 — public view filters out suspended, pending-approval, AND auto-clears expired temp-closes
 function getPublicVendors() {
     const now = Date.now();
@@ -4511,7 +4538,7 @@ function getCampusStar() {
 function checkAndUpdateCampusStar() {
     const star   = getCampusStar();
     const newId  = star ? star.id : null;
-    const prevId = localStorage.getItem('acm_campus_star') || null;
+    const prevId = DB.config.campus_star || null;
     if (newId === prevId) return;
     if (prevId) {
         addNotification('⭐', 'Campus Star Lost',
@@ -4522,9 +4549,11 @@ function checkAndUpdateCampusStar() {
         addNotification('⭐', 'You\'re the Campus Star!',
             'You are now the #1 vendor on ACity Market! Your store appears first on the homepage.',
             null, null, newId);
-        localStorage.setItem('acm_campus_star', newId);
+        DB.config.campus_star = newId;
+        syncConfig('campus_star', newId).catch(console.warn);
     } else {
-        localStorage.removeItem('acm_campus_star');
+        DB.config.campus_star = null;
+        syncConfig('campus_star', '').catch(console.warn);
     }
 }
 
@@ -4602,8 +4631,12 @@ init();
 
 function getAdminCreds() { return safeGetJSON('acm_admin_creds', null); }
 
-function getRequests()   { return safeGetJSON('acm_requests', []); }
-function saveRequests(r) { safeSetJSON('acm_requests', r); }
+function getRequests() { return DB.requests; }
+function saveRequests(newRequests) {
+    const old = DB.requests.slice();
+    DB.requests = newRequests;
+    _diffSync(newRequests, old, syncRequest, deleteRequestFromDB);
+}
 
 // ── ADMIN LOGIN / LOGOUT ──
 function openAdminLogin() {
@@ -5023,8 +5056,8 @@ function renderAdminPosts() {
 
 function adminDeletePost(postId) {
     if (!confirm('Delete this post? This cannot be undone.')) return;
-    const posts = getAnnouncements().filter(a => a.id !== postId);
-    safeSetJSON('acm_announcements', posts);
+    DB.announcements = DB.announcements.filter(a => a.id !== postId);
+    deleteAnnouncementFromDB(postId).catch(console.warn);
     renderAdminPosts();
     renderRecentAnnouncements();
     showToast('Post deleted');
