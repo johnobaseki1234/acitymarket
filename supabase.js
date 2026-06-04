@@ -200,6 +200,74 @@ function startRealtimeSubscriptions() {
         .subscribe();
 }
 
+// ═══════════════════════════════════════════
+// SUPABASE STORAGE — IMAGE UPLOAD & MIGRATION
+// ═══════════════════════════════════════════
+
+// Upload a base64 dataURL to Supabase Storage.
+// Returns the public URL on success, or null on failure.
+async function uploadImage(dataUrl, folder, filename) {
+    if (!_supabase || !dataUrl || !dataUrl.startsWith('data:')) return null;
+    try {
+        const res  = await fetch(dataUrl);
+        const blob = await res.blob();
+        const ext  = blob.type === 'image/png' ? 'png' : 'jpg';
+        const path = `${folder}/${filename || Date.now()}.${ext}`;
+        const { error } = await _supabase.storage.from('acm-images').upload(path, blob, { upsert: true });
+        if (error) { console.warn('uploadImage storage error:', error.message); return null; }
+        const { data } = _supabase.storage.from('acm-images').getPublicUrl(path);
+        return data.publicUrl || null;
+    } catch(e) {
+        console.warn('uploadImage error:', e);
+        return null;
+    }
+}
+
+// Scan all vendors + announcements for base64 images and migrate them to Storage.
+// Runs silently in the background after loadAllData().
+async function migrateImagesToStorage() {
+    if (!_supabase) return;
+
+    // ── Vendors (logos + product photos) ──
+    for (const v of DB.vendors) {
+        let dirty = false;
+
+        if (v.logo && v.logo.startsWith('data:')) {
+            const url = await uploadImage(v.logo, 'logos', v.id);
+            if (url) { v.logo = url; dirty = true; }
+        }
+
+        for (const p of (v.products || [])) {
+            // Migrate photos array
+            if (p.photos && p.photos.length) {
+                for (let i = 0; i < p.photos.length; i++) {
+                    if (p.photos[i] && p.photos[i].startsWith('data:')) {
+                        const url = await uploadImage(p.photos[i], 'products', `${v.id}_${p.id}_${i}`);
+                        if (url) { p.photos[i] = url; dirty = true; }
+                    }
+                }
+                p.photo = p.photos[0] || null; // keep in sync
+            } else if (p.photo && p.photo.startsWith('data:')) {
+                const url = await uploadImage(p.photo, 'products', `${v.id}_${p.id}_0`);
+                if (url) { p.photo = url; p.photos = [url]; dirty = true; }
+            }
+        }
+
+        if (dirty) await syncVendor(v).catch(console.warn);
+    }
+
+    // ── Announcements / Posts ──
+    for (const a of DB.announcements) {
+        if (a.photo && a.photo.startsWith('data:')) {
+            const url = await uploadImage(a.photo, 'posts', a.id);
+            if (url) {
+                a.photo = url;
+                await syncAnnouncement(a).catch(console.warn);
+            }
+        }
+    }
+}
+
 // ── SAVE HELPERS WITH DIFF DETECTION ──
 // Only syncs rows that actually changed — avoids upserting everything on every save.
 
