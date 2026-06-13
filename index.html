@@ -31,21 +31,6 @@
         </div>
     </header>
 
-    <div class="category-nav">
-        <div class="category-list" id="categoryList">
-            <button class="category-chip active" onclick="filterCategory('All', this)">All</button>
-            <button class="category-chip" onclick="filterCategory('Food', this)">Food</button>
-            <button class="category-chip" onclick="filterCategory('Drinks', this)">Drinks</button>
-            <button class="category-chip" onclick="filterCategory('Fashion', this)">Fashion</button>
-            <button class="category-chip" onclick="filterCategory('Beads & Jewelry', this)">Beads & Jewelry</button>
-            <button class="category-chip" onclick="filterCategory('Beauty & Hair', this)">Beauty & Hair</button>
-            <button class="category-chip" onclick="filterCategory('Electronics', this)">Electronics</button>
-            <button class="category-chip" onclick="filterCategory('Services', this)">Services</button>
-            <button class="category-chip" onclick="filterCategory('Snacks', this)">Snacks</button>
-            <button class="category-chip" onclick="filterCategory('Rentals', this)">Rentals</button>
-        </div>
-    </div>
-
     <div class="saved-searches-strip hidden" id="savedSearchesStrip">
         <span class="saved-searches-label">Saved</span>
     </div>
@@ -294,6 +279,7 @@
                 <div id="vs-activity-section" style="margin-top:12px;"></div>
                 <div id="vs-sections-section" style="margin-top:12px;"></div>
                 <div id="vs-boost-section" style="margin-top:12px;"></div>
+                <div id="vs-trend-section" style="margin-top:12px;"></div>
                 <p style="font-size:13px;color:var(--text-muted);text-align:center;padding:8px 0;">
                     Revenue and orders update as customers check out from your store.
                 </p>
@@ -1178,6 +1164,39 @@
 
         <button class="btn-primary" id="banner-save-btn" onclick="saveBanner()">Save Banner</button>
         <button class="btn-secondary" onclick="closeModal('bannerModal')">Cancel</button>
+    </div>
+</div>
+
+<!-- ═══════════════ MODAL: VENDOR "TREND ON CAMPUS" ═══════════════ -->
+<div class="modal-overlay hidden" id="trendModal">
+    <div class="modal">
+        <div class="modal-handle"></div>
+        <h2>Trend on Campus</h2>
+        <p style="font-size:13px;color:var(--text-muted);margin-bottom:16px;">Get a banner at the top of the homepage. Just write your message — we style it with your store name. Admin reviews it before it goes live.</p>
+        <div class="form-group">
+            <label>Headline</label>
+            <input type="text" id="trend-title" placeholder="e.g. 20% off jollof this week!" maxlength="60" oninput="updateTrendPreview()">
+        </div>
+        <div class="form-group">
+            <label>Subtitle <span style="color:var(--text-muted);font-weight:400;">(optional)</span></label>
+            <input type="text" id="trend-subtitle" placeholder="e.g. Tap to order from our store" maxlength="80" oninput="updateTrendPreview()">
+        </div>
+
+        <label style="font-size:13px;color:var(--text-muted);font-weight:600;">Preview</label>
+        <div class="banner-carousel" style="margin:6px 0 16px;">
+            <div class="banner-track">
+                <div class="banner-slide" id="trend-preview-slide" style="cursor:default;">
+                    <div class="banner-overlay">
+                        <span class="banner-tag" id="trend-preview-tag"></span>
+                        <div class="banner-title" id="trend-preview-title"></div>
+                        <div class="banner-subtitle" id="trend-preview-subtitle"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <button class="btn-primary" onclick="submitTrendRequest()">Submit for Review</button>
+        <button class="btn-secondary" onclick="closeModal('trendModal')">Cancel</button>
     </div>
 </div>
 

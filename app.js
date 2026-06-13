@@ -398,8 +398,15 @@ const BANNER_TYPES = {
     deal:   { label: '🔥 HOT DEAL',     gradient: 'linear-gradient(135deg,#c0392b 0%,#e74c3c 100%)', accent: '#c0392b' },
     new:    { label: '✨ JUST DROPPED',  gradient: 'linear-gradient(135deg,#1e3a5f 0%,#2563eb 100%)', accent: '#1e3a5f' },
     star:   { label: '⭐ CAMPUS STAR',   gradient: 'linear-gradient(135deg,#a16207 0%,#f59e0b 100%)', accent: '#a16207' },
-    notice: { label: '📣 ANNOUNCEMENT', gradient: 'linear-gradient(135deg,#15803d 0%,#22c55e 100%)', accent: '#15803d' }
+    notice: { label: '📣 ANNOUNCEMENT', gradient: 'linear-gradient(135deg,#15803d 0%,#22c55e 100%)', accent: '#15803d' },
+    vendor: { label: '⭐ FEATURED',      gradient: 'linear-gradient(135deg,#5b21b6 0%,#7c3aed 100%)', accent: '#5b21b6' }
 };
+
+// Tag chip text for a banner: a vendor banner shows the store name; others use the type label.
+function bannerTagLabel(b) {
+    const t = BANNER_TYPES[b.type] || BANNER_TYPES.notice;
+    return b.storeName ? ('⭐ ' + b.storeName) : t.label;
+}
 
 let _bannerIdx = 0, _bannerN = 0, _bannerTimer = null, _bannerTouchX = null;
 
@@ -417,7 +424,7 @@ function bannerSlideHTML(b) {
         : `background:${t.gradient};`;
     return `<div class="banner-slide" style="${bg}" onclick="bannerClick('${b.id}')">
         <div class="banner-overlay">
-            <span class="banner-tag" style="color:${t.accent};">${t.label}</span>
+            <span class="banner-tag" style="color:${t.accent};">${escHtml(bannerTagLabel(b))}</span>
             <div class="banner-title">${escHtml(b.title || '')}</div>
             ${b.subtitle ? `<div class="banner-subtitle">${escHtml(b.subtitle)}</div>` : ''}
         </div>
@@ -1845,33 +1852,8 @@ function handleSearch() {
     updateSaveSearchBtn();
 }
 
-function filterCategory(cat, el) {
-    document.querySelectorAll('.category-chip').forEach(c => c.classList.remove('active'));
-    el.classList.add('active');
-    document.getElementById('searchInput').value = '';
-
-    if (cat === 'All') {
-        document.getElementById('searchResultsSection').classList.add('hidden');
-        _setHomeSectionsVisible(true);
-        renderSponsoredSection();
-        return;
-    }
-
-    _setHomeSectionsVisible(false);
-    document.getElementById('searchResultsSection').classList.remove('hidden');
-
-    const vendors = getPublicVendors().filter(v => v.category === cat);
-    const countEl = document.getElementById('searchCount');
-    if (countEl) countEl.textContent = vendors.length;
-    document.getElementById('noResults').classList.toggle('hidden', vendors.length > 0);
-    // For category filter, inject a vendor-grid wrapper then render cards
-    const grid = document.getElementById('searchResultsGrid');
-    if (grid) {
-        grid.innerHTML = vendors.length
-            ? `<div class="vendor-grid">${vendors.map(v => vendorCardHTML(v)).join('')}</div>`
-            : '';
-    }
-}
+// Back-compat shim — the chip row was replaced by the search-bar dropdown.
+function filterCategory(cat, el) { pickCategory(cat); }
 
 function applyFilters(searchQuery) {
     const q = (searchQuery || document.getElementById('searchInput').value).trim().toLowerCase();
@@ -2371,6 +2353,7 @@ function renderVSummary() {
         }
     }
     renderBoostSection();
+    renderTrendSection();
 }
 
 // EC2.6 — vendor status quick-setter with temp-close support
@@ -3690,28 +3673,79 @@ function trackRecentlyViewed(vendorId) {
     localStorage.setItem('acm_recently_viewed', JSON.stringify(rv));
 }
 
+// V2a — categories live here now (chip row removed). Shown when the
+// search bar is focused, alongside any recently-viewed vendors.
+const HOME_CATEGORIES = ['All','Food','Drinks','Fashion','Beads & Jewelry','Beauty & Hair','Electronics','Services','Snacks','Rentals'];
+
 function showRVDropdown() {
-    const rv = safeGetJSON('acm_recently_viewed', []);
     const dropdown = document.getElementById('rvDropdown');
-    if (!dropdown || !rv.length) return;
-    const vendors = getVendors();
-    const items = rv.map(id => vendors.find(v => v.id === id)).filter(Boolean);
-    if (!items.length) return;
-    dropdown.innerHTML = `<div class="rv-dropdown-label">RECENTLY VIEWED</div>` +
-        items.map(v => {
-            const img = v.logo
-                ? `<img src="${v.logo}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;" onerror="this.style.display='none'">`
-                : `<span style="font-size:18px;">${v.emoji}</span>`;
-            return `<div class="rv-dropdown-item" onmousedown="openVendor('${v.id}')">
-                <div class="rv-dropdown-icon">${img}</div>
-                <div>
-                    <div style="font-size:13px;font-weight:600;color:var(--text-dark);">${escHtml(v.name)}</div>
-                    <div style="font-size:12px;color:var(--text-muted);">${escHtml(v.category)}</div>
-                </div>
-            </div>`;
-        }).join('');
+    if (!dropdown) return;
+
+    // ── Browse Categories (always shown) ──
+    const active = state.activeCategory || 'All';
+    const catHTML = `<div class="rv-dropdown-label">BROWSE CATEGORIES</div>
+        <div class="cat-dd-grid">` +
+        HOME_CATEGORIES.map(c =>
+            `<button class="cat-dd-chip${c === active ? ' active' : ''}" onmousedown="event.preventDefault();pickCategory('${c.replace(/'/g, "\\'")}')">${c}</button>`
+        ).join('') + `</div>`;
+
+    // ── Recently Viewed (only if any) ──
+    let rvHTML = '';
+    const rv = safeGetJSON('acm_recently_viewed', []);
+    if (rv.length) {
+        const vendors = getVendors();
+        const items = rv.map(id => vendors.find(v => v.id === id)).filter(Boolean);
+        if (items.length) {
+            rvHTML = `<div class="rv-dropdown-label" style="margin-top:4px;">RECENTLY VIEWED</div>` +
+                items.map(v => {
+                    const img = v.logo
+                        ? `<img src="${v.logo}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;" onerror="this.style.display='none'">`
+                        : `<span style="font-size:18px;">${v.emoji}</span>`;
+                    return `<div class="rv-dropdown-item" onmousedown="openVendor('${v.id}')">
+                        <div class="rv-dropdown-icon">${img}</div>
+                        <div>
+                            <div style="font-size:13px;font-weight:600;color:var(--text-dark);">${escHtml(v.name)}</div>
+                            <div style="font-size:12px;color:var(--text-muted);">${escHtml(v.category)}</div>
+                        </div>
+                    </div>`;
+                }).join('');
+        }
+    }
+
+    dropdown.innerHTML = catHTML + rvHTML;
     dropdown.classList.add('open');
     document.addEventListener('click', hideRVDropdownOutside);
+}
+
+// Filter the home page to a single category (or show everything for 'All').
+function pickCategory(cat) {
+    state.activeCategory = cat;
+    hideRVDropdown();
+    const input = document.getElementById('searchInput');
+    if (input) { input.value = ''; input.blur(); }
+
+    if (cat === 'All') {
+        document.getElementById('searchResultsSection').classList.add('hidden');
+        _setHomeSectionsVisible(true);
+        renderSponsoredSection();
+        savePageState('home');
+        return;
+    }
+
+    _setHomeSectionsVisible(false);
+    document.getElementById('searchResultsSection').classList.remove('hidden');
+
+    const vendors = getPublicVendors().filter(v => v.category === cat);
+    const countEl = document.getElementById('searchCount');
+    if (countEl) countEl.textContent = vendors.length;
+    document.getElementById('noResults').classList.toggle('hidden', vendors.length > 0);
+    const grid = document.getElementById('searchResultsGrid');
+    if (grid) {
+        grid.innerHTML = vendors.length
+            ? `<div class="vendor-grid">${vendors.map(v => vendorCardHTML(v)).join('')}</div>`
+            : '';
+    }
+    window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
 function hideRVDropdown() {
@@ -4480,6 +4514,91 @@ function renderBoostSection() {
     </div>`;
 }
 
+// ── VENDOR: TREND ON CAMPUS (banner request, Phase V2b) ──
+// Returns the vendor's currently-live banner, if any.
+function vendorActiveBanner(vendorId) {
+    return getBanners().find(b => b.vendorBanner && b.linkVendorId === vendorId && b.active !== false);
+}
+
+function renderTrendSection() {
+    const el = document.getElementById('vs-trend-section');
+    if (!el || !state.loggedVendor) return;
+    const v = state.loggedVendor;
+    const pending = getRequests().find(r => r.type === 'banner' && r.vendorId === v.id && r.status === 'pending');
+    const active = vendorActiveBanner(v.id);
+    const statusText = active
+        ? 'Live — your banner is on the homepage'
+        : pending ? 'Request pending admin approval' : 'Not active';
+    el.innerHTML = `
+    <div style="background:var(--bg-light);border:1px solid var(--border);border-radius:10px;padding:10px 14px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+            <div>
+                <div style="font-size:10px;font-weight:700;color:var(--text-muted);letter-spacing:0.4px;">TREND ON CAMPUS</div>
+                <div style="font-size:13px;color:var(--text-dark);margin-top:2px;">${statusText}</div>
+            </div>
+            ${!active && !pending ? `<button onclick="openTrendModal()" style="font-size:12px;color:var(--light-blue);background:none;border:none;cursor:pointer;font-weight:600;padding:4px;">Create banner</button>` : ''}
+        </div>
+        ${!active && !pending ? `<div style="font-size:12px;color:var(--text-muted);margin-top:4px;">A homepage banner with your store name. Admin reviews it before it goes live.</div>` : ''}
+    </div>`;
+}
+
+function openTrendModal() {
+    if (!state.loggedVendor) return;
+    document.getElementById('trend-title').value = '';
+    document.getElementById('trend-subtitle').value = '';
+    updateTrendPreview();
+    document.getElementById('trendModal').classList.remove('hidden');
+}
+
+function updateTrendPreview() {
+    const t = BANNER_TYPES.vendor;
+    const title = document.getElementById('trend-title').value;
+    const subtitle = document.getElementById('trend-subtitle').value;
+    const store = state.loggedVendor ? state.loggedVendor.name : 'Your store';
+    const slide = document.getElementById('trend-preview-slide');
+    slide.style.cssText = 'cursor:default;background:' + t.gradient + ';';
+    const tagEl = document.getElementById('trend-preview-tag');
+    tagEl.textContent = '⭐ ' + store;
+    tagEl.style.color = t.accent;
+    document.getElementById('trend-preview-title').textContent = title || 'Your headline here';
+    const subEl = document.getElementById('trend-preview-subtitle');
+    subEl.textContent = subtitle;
+    subEl.style.display = subtitle ? '' : 'none';
+}
+
+function submitTrendRequest() {
+    if (!state.loggedVendor) return;
+    const v = state.loggedVendor;
+    const title = document.getElementById('trend-title').value.trim();
+    const subtitle = document.getElementById('trend-subtitle').value.trim();
+    if (!title) { showToast('Please enter a headline'); return; }
+
+    if (vendorActiveBanner(v.id)) { showToast('You already have a live banner'); return; }
+    const reqs = getRequests();
+    if (reqs.find(r => r.type === 'banner' && r.vendorId === v.id && r.status === 'pending')) {
+        showToast('You already have a banner request pending'); return;
+    }
+
+    reqs.push({
+        id: 'req' + Date.now(),
+        type: 'banner',
+        from: v.name,
+        vendorId: v.id,
+        vendorName: v.name,
+        bannerTitle: title,
+        bannerSubtitle: subtitle,
+        message: `${v.name} wants to trend on campus with a homepage banner.`,
+        date: new Date().toISOString(),
+        status: 'pending'
+    });
+    saveRequests(reqs);
+    updateAdminReqBadge();
+    addNotification('📤', 'Banner Request Sent', 'Your "Trend on Campus" banner was sent to admin for review.', null, null, v.id);
+    closeModal('trendModal');
+    renderTrendSection();
+    showToast('Sent to admin for review!');
+}
+
 // ── SPONSORED SECTION ON HOMEPAGE ──
 function renderSponsoredSection() {
     const boosted = getPublicVendors().filter(v => v.isBoosted);
@@ -5195,18 +5314,32 @@ function renderAdminRequests() {
         const typeTag =
             r.type === 'category' ? 'Category Request' :
             r.type === 'boost'    ? 'Boost Request' :
+            r.type === 'banner'   ? '⭐ Trend Banner' :
             r.type === 'report'   ? 'Vendor Report' :
                                     '💬 Feedback / Help';
         const typeClass =
             r.type === 'category' ? 'req-category' :
             r.type === 'boost'    ? 'req-boost' :
+            r.type === 'banner'   ? 'req-boost' :
             r.type === 'report'   ? 'req-report' :
                                     'req-feedback';
+        // Trend-banner requests get a live gradient preview of what would go live
+        const bannerPreview = r.type === 'banner' ? `
+            <div class="banner-carousel" style="margin:8px 0;box-shadow:none;">
+                <div class="banner-track"><div class="banner-slide" style="cursor:default;height:110px;background:${BANNER_TYPES.vendor.gradient};">
+                    <div class="banner-overlay">
+                        <span class="banner-tag" style="color:${BANNER_TYPES.vendor.accent};">⭐ ${escHtml(r.vendorName || r.from)}</span>
+                        <div class="banner-title" style="font-size:17px;">${escHtml(r.bannerTitle || '')}</div>
+                        ${r.bannerSubtitle ? `<div class="banner-subtitle">${escHtml(r.bannerSubtitle)}</div>` : ''}
+                    </div>
+                </div></div>
+            </div>` : '';
         return `
         <div class="request-card">
             <span class="request-type-tag ${typeClass}">${typeTag}</span>${statusBadge}
             <div style="font-size:13px;font-weight:600;margin-bottom:4px;">${escHtml(r.from)}</div>
             <div style="font-size:13px;color:var(--text-muted);margin-bottom:4px;">${escHtml(r.message)}</div>
+            ${bannerPreview}
             ${r.extra ? `<div style="font-size:12px;color:var(--text-muted);font-style:italic;">${escHtml(r.extra)}</div>` : ''}
             <div style="font-size:12px;color:var(--text-muted);margin-top:6px;">${new Date(r.date).toLocaleDateString()}</div>
             ${r.type === 'report' ? reportActions : actions}
@@ -5262,6 +5395,34 @@ function resolveRequest(reqId, status) {
         } else {
             addNotification('❌', 'Boost Request Rejected',
                 'Your homepage boost request was not approved this time. Contact admin for details.',
+                null, null, r.vendorId);
+        }
+    } else if (r.type === 'banner') {
+        if (status === 'approved') {
+            const banners = getBanners();
+            const maxOrder = banners.reduce((m, b) => Math.max(m, b.order || 0), -1);
+            banners.push({
+                id: 'b_v' + Date.now(),
+                type: 'vendor',
+                title: r.bannerTitle || '',
+                subtitle: r.bannerSubtitle || '',
+                image: null,
+                linkType: 'vendor',
+                linkVendorId: r.vendorId,
+                linkPage: null,
+                active: true,
+                order: maxOrder + 1,
+                vendorBanner: true,
+                storeName: r.vendorName || r.from
+            });
+            saveBanners(banners);
+            renderHomeBanner();
+            addNotification('🎉', "You're trending on campus!",
+                `Your banner "${r.bannerTitle}" is now live on the homepage.`,
+                { type: 'vendor', id: r.vendorId }, null, r.vendorId);
+        } else {
+            addNotification('❌', 'Banner Not Approved',
+                'Your "Trend on Campus" banner request was not approved this time.',
                 null, null, r.vendorId);
         }
     } else if (r.type === 'report') {

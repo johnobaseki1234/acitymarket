@@ -1938,9 +1938,28 @@
             top: calc(100% + 4px); left: 0; right: 0;
             background: var(--white); border: 1px solid var(--border);
             border-radius: 10px; box-shadow: 0 4px 16px rgba(0,0,0,0.12);
-            z-index: 200; overflow: hidden;
+            z-index: 200; overflow-y: auto; overflow-x: hidden;
+            max-height: 72vh;
         }
         .rv-dropdown.open { display: block; }
+        /* V2a — category chips inside the search dropdown */
+        .cat-dd-grid {
+            display: flex; flex-wrap: wrap; gap: 7px;
+            padding: 2px 12px 10px;
+        }
+        .cat-dd-chip {
+            padding: 7px 13px; border-radius: var(--radius-full);
+            border: 1.5px solid var(--border); background: var(--white);
+            font-size: 13px; font-weight: 600; color: var(--text-dark);
+            cursor: pointer; font-family: inherit; transition: all 0.15s;
+        }
+        .cat-dd-chip:hover, .cat-dd-chip.active {
+            background: var(--primary-blue); color: #fff; border-color: var(--primary-blue);
+        }
+        body.dark-mode .cat-dd-chip { background: var(--surface-input); }
+        body.dark-mode .cat-dd-chip:hover, body.dark-mode .cat-dd-chip.active {
+            background: var(--light-blue); border-color: var(--light-blue);
+        }
         .rv-dropdown-label {
             font-size: 10px; font-weight: 700; color: var(--text-muted);
             letter-spacing: 0.5px; padding: 8px 12px 4px;
