@@ -390,8 +390,116 @@ function renderHeroStats() {
     `;
 }
 
+// ═══════════════════════════════════════════
+// HOMEPAGE PROMO BANNER CAROUSEL (Phase V1)
+// Admin-managed slides stored in DB.config.banners.
+// ═══════════════════════════════════════════
+const BANNER_TYPES = {
+    deal:   { label: '🔥 HOT DEAL',     gradient: 'linear-gradient(135deg,#c0392b 0%,#e74c3c 100%)', accent: '#c0392b' },
+    new:    { label: '✨ JUST DROPPED',  gradient: 'linear-gradient(135deg,#1e3a5f 0%,#2563eb 100%)', accent: '#1e3a5f' },
+    star:   { label: '⭐ CAMPUS STAR',   gradient: 'linear-gradient(135deg,#a16207 0%,#f59e0b 100%)', accent: '#a16207' },
+    notice: { label: '📣 ANNOUNCEMENT', gradient: 'linear-gradient(135deg,#15803d 0%,#22c55e 100%)', accent: '#15803d' }
+};
+
+let _bannerIdx = 0, _bannerN = 0, _bannerTimer = null, _bannerTouchX = null;
+
+function getBanners() { return [...(DB.config.banners || [])]; }
+function saveBanners(arr) {
+    DB.config.banners = arr;
+    syncConfig('banners', JSON.stringify(arr)).catch(console.warn);
+}
+
+function bannerSlideHTML(b) {
+    const t = BANNER_TYPES[b.type] || BANNER_TYPES.notice;
+    const hasImg = b.image && b.image.length;
+    const bg = hasImg
+        ? `background-image:linear-gradient(90deg,rgba(0,0,0,0.55),rgba(0,0,0,0.15)),url('${b.image}');background-size:cover;background-position:center;`
+        : `background:${t.gradient};`;
+    return `<div class="banner-slide" style="${bg}" onclick="bannerClick('${b.id}')">
+        <div class="banner-overlay">
+            <span class="banner-tag" style="color:${t.accent};">${t.label}</span>
+            <div class="banner-title">${escHtml(b.title || '')}</div>
+            ${b.subtitle ? `<div class="banner-subtitle">${escHtml(b.subtitle)}</div>` : ''}
+        </div>
+    </div>`;
+}
+
+function renderHomeBanner() {
+    const sec = document.getElementById('homeBannerSection');
+    const track = document.getElementById('bannerTrack');
+    const dotsEl = document.getElementById('bannerDots');
+    if (!sec || !track) return;
+
+    const banners = getBanners()
+        .filter(b => b.active !== false)
+        .sort((a, b) => (a.order || 0) - (b.order || 0));
+    _bannerN = banners.length;
+
+    if (!_bannerN) {
+        sec.classList.add('hidden');
+        if (_bannerTimer) { clearInterval(_bannerTimer); _bannerTimer = null; }
+        track.innerHTML = '';
+        if (dotsEl) dotsEl.innerHTML = '';
+        return;
+    }
+
+    sec.classList.remove('hidden');
+    track.innerHTML = banners.map(bannerSlideHTML).join('');
+    if (dotsEl) {
+        dotsEl.innerHTML = _bannerN > 1
+            ? banners.map((b, i) => `<button class="banner-dot${i === 0 ? ' active' : ''}" onclick="goToBanner(${i})" aria-label="Slide ${i + 1}"></button>`).join('')
+            : '';
+    }
+    _bannerIdx = 0;
+    _applyBannerTransform();
+    _startBannerAuto();
+}
+
+function _applyBannerTransform() {
+    const track = document.getElementById('bannerTrack');
+    if (track) track.style.transform = `translateX(-${_bannerIdx * 100}%)`;
+    document.querySelectorAll('#bannerDots .banner-dot').forEach((d, i) => d.classList.toggle('active', i === _bannerIdx));
+}
+
+function goToBanner(i) {
+    if (!_bannerN) return;
+    _bannerIdx = (i + _bannerN) % _bannerN;
+    _applyBannerTransform();
+    _startBannerAuto();
+}
+
+function _startBannerAuto() {
+    if (_bannerTimer) clearInterval(_bannerTimer);
+    if (_bannerN > 1) {
+        _bannerTimer = setInterval(() => {
+            _bannerIdx = (_bannerIdx + 1) % _bannerN;
+            _applyBannerTransform();
+        }, 4800);
+    }
+}
+
+function bannerTouchStart(e) { _bannerTouchX = e.changedTouches[0].clientX; }
+function bannerTouchEnd(e) {
+    if (_bannerTouchX == null) return;
+    const dx = e.changedTouches[0].clientX - _bannerTouchX;
+    if (Math.abs(dx) > 40) goToBanner(_bannerIdx + (dx < 0 ? 1 : -1));
+    _bannerTouchX = null;
+}
+
+function bannerClick(id) {
+    const b = getBanners().find(x => x.id === id);
+    if (!b) return;
+    if (b.linkType === 'vendor' && b.linkVendorId) {
+        openVendor(b.linkVendorId);
+    } else if (b.linkType === 'page' && b.linkPage) {
+        showPage(b.linkPage);
+        if (b.linkPage === 'announcements') loadAllAnnouncements();
+    }
+}
+
 function renderHomePage() {
     checkAndUpdateCampusStar();
+    renderHomeBanner();
     renderHeroStats();
     renderSponsoredSection();
     const campusStar = getCampusStar();
@@ -4778,6 +4886,11 @@ function saveRequests(newRequests) {
 // ── ADMIN LOGIN / LOGOUT ──
 function openAdminLogin() {
     if (state.adminLoggedIn) { showPage('admin'); switchATab('vendors'); return; }
+    // First run: no admin account yet — go straight to setup
+    if (!DB.config.admin_created) {
+        document.getElementById('adminSetupModal').classList.remove('hidden');
+        return;
+    }
     document.getElementById('adminUser').value = '';
     document.getElementById('adminPass').value = '';
     document.getElementById('adminLoginModal').classList.remove('hidden');
@@ -4823,6 +4936,8 @@ async function submitAdminSetup() {
     });
     if (error) { showToastError('Setup failed: ' + error.message); return; }
 
+    DB.config.admin_created = true;
+    await syncConfig('admin_created', 'true').catch(console.warn);
     closeModal('adminSetupModal');
     state.adminLoggedIn = true;
     showPage('admin');
@@ -4837,12 +4952,13 @@ function exitAdmin() {
 
 // ── ADMIN TABS ──
 function switchATab(tab) {
-    ['vendors','requests','posts','analytics','settings'].forEach(t => {
+    ['vendors','requests','banners','posts','analytics','settings'].forEach(t => {
         document.getElementById('atab-' + t).classList.toggle('hidden', t !== tab);
         document.getElementById('atab-btn-' + t).classList.toggle('active', t === tab);
     });
     if (tab === 'vendors')   renderAdminVendors();
     if (tab === 'requests')  renderAdminRequests();
+    if (tab === 'banners')   renderAdminBanners();
     if (tab === 'posts')     renderAdminPosts();
     if (tab === 'analytics') renderAdminAnalytics();
     if (tab === 'settings')  renderAdminSettings();
@@ -5173,6 +5289,187 @@ function resolveRequest(reqId, status) {
 }
 
 // ── ADMIN: POSTS ──
+// ── ADMIN: BANNERS (Phase V1) ──
+function renderAdminBanners() {
+    const banners = getBanners().sort((a, b) => (a.order || 0) - (b.order || 0));
+    const el = document.getElementById('atab-banners');
+    const addBtn = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+        <div style="font-size:12px;color:var(--text-muted);">Banners rotate at the top of the homepage.</div>
+        <button onclick="openBannerModal(null)" style="background:var(--primary-red);color:white;border:none;padding:9px 16px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;flex-shrink:0;">+ Add Banner</button>
+    </div>`;
+    if (!banners.length) {
+        el.innerHTML = addBtn + `<div class="empty-state"><h3 style="margin-top:8px;">No banners yet</h3><p>Add one to feature deals, new vendors, or announcements.</p></div>`;
+        return;
+    }
+    el.innerHTML = addBtn + banners.map((b, i) => {
+        const t = BANNER_TYPES[b.type] || BANNER_TYPES.notice;
+        const preview = b.image
+            ? `background-image:linear-gradient(90deg,rgba(0,0,0,0.5),rgba(0,0,0,0.1)),url('${b.image}');background-size:cover;background-position:center;`
+            : `background:${t.gradient};`;
+        const linkLabel = b.linkType === 'vendor'
+            ? '→ Vendor store'
+            : (b.linkType === 'page' ? '→ ' + (b.linkPage === 'announcements' ? 'Posts page' : 'Home') : 'No link');
+        const btn = (label, handler, extra = '') => `<button onclick="${handler}" ${extra} style="background:var(--bg-light);color:var(--text-dark);border:1px solid var(--border);padding:6px 11px;border-radius:7px;font-size:12px;font-weight:600;cursor:pointer;">${label}</button>`;
+        return `<div style="background:white;border-radius:var(--radius);box-shadow:var(--shadow);margin-bottom:10px;overflow:hidden;${b.active === false ? 'opacity:0.55;' : ''}">
+            <div style="height:78px;${preview}display:flex;align-items:flex-end;padding:9px 11px;">
+                <span style="background:#fff;color:${t.accent};font-size:10px;font-weight:800;padding:2px 8px;border-radius:20px;">${t.label}</span>
+            </div>
+            <div style="padding:11px 13px;">
+                <div style="font-weight:700;font-size:14px;margin-bottom:2px;">${escHtml(b.title || '(no title)')}</div>
+                <div style="font-size:12px;color:var(--text-muted);margin-bottom:3px;">${escHtml(b.subtitle || '')}</div>
+                <div style="font-size:11px;color:var(--text-muted);margin-bottom:11px;">${linkLabel}${b.active === false ? ' · Hidden' : ''}</div>
+                <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                    ${btn('↑', `moveBanner('${b.id}',-1)`, i === 0 ? 'disabled style="opacity:0.4;"' : '')}
+                    ${btn('↓', `moveBanner('${b.id}',1)`, i === banners.length - 1 ? 'disabled style="opacity:0.4;"' : '')}
+                    ${btn(b.active === false ? 'Show' : 'Hide', `toggleBannerActive('${b.id}')`)}
+                    ${btn('Edit', `openBannerModal('${b.id}')`)}
+                    <button onclick="deleteBanner('${b.id}')" style="background:#fce4ec;color:#b71c1c;border:none;padding:6px 11px;border-radius:7px;font-size:12px;font-weight:600;cursor:pointer;">Delete</button>
+                </div>
+            </div>
+        </div>`;
+    }).join('');
+}
+
+let _bannerPendingImage = undefined; // undefined = unchanged, null = removed, string = new dataUrl
+
+function openBannerModal(id) {
+    _bannerPendingImage = undefined;
+    const banners = getBanners();
+    const b = id ? banners.find(x => x.id === id) : null;
+
+    document.getElementById('bannerModalTitle').textContent = b ? 'Edit Banner' : 'Add Banner';
+    document.getElementById('banner-id').value = b ? b.id : '';
+    document.getElementById('banner-type').value = b ? (b.type || 'notice') : 'deal';
+    document.getElementById('banner-title').value = b ? (b.title || '') : '';
+    document.getElementById('banner-subtitle').value = b ? (b.subtitle || '') : '';
+    document.getElementById('banner-image').value = '';
+    document.getElementById('banner-image-note').textContent = b && b.image ? 'Current image kept. Pick a new file to replace it.' : '';
+    document.getElementById('banner-linkType').value = b ? (b.linkType || 'none') : 'none';
+
+    // Populate vendor dropdown with public (approved, not suspended) vendors
+    const vendorSel = document.getElementById('banner-vendor');
+    vendorSel.innerHTML = getPublicVendors()
+        .map(v => `<option value="${v.id}">${escHtml(v.name)}</option>`).join('');
+    if (b && b.linkVendorId) vendorSel.value = b.linkVendorId;
+    document.getElementById('banner-page').value = b && b.linkPage ? b.linkPage : 'announcements';
+
+    onBannerLinkTypeChange();
+    updateBannerPreview();
+    document.getElementById('bannerModal').classList.remove('hidden');
+}
+
+function onBannerLinkTypeChange() {
+    const lt = document.getElementById('banner-linkType').value;
+    document.getElementById('banner-vendor-row').classList.toggle('hidden', lt !== 'vendor');
+    document.getElementById('banner-page-row').classList.toggle('hidden', lt !== 'page');
+}
+
+function onBannerImagePick(input) {
+    const file = input.files[0];
+    if (!file) return;
+    compressImage(file, 1200, 0.8).then(dataUrl => {
+        _bannerPendingImage = dataUrl;
+        document.getElementById('banner-image-note').textContent = 'New image selected.';
+        updateBannerPreview();
+    }).catch(e => showToastError(e.message));
+}
+
+function updateBannerPreview() {
+    const type = document.getElementById('banner-type').value;
+    const t = BANNER_TYPES[type] || BANNER_TYPES.notice;
+    const title = document.getElementById('banner-title').value;
+    const subtitle = document.getElementById('banner-subtitle').value;
+
+    // Resolve which image to preview: new pick > existing (on edit) > none
+    let img = _bannerPendingImage;
+    if (img === undefined) {
+        const id = document.getElementById('banner-id').value;
+        const existing = id ? getBanners().find(x => x.id === id) : null;
+        img = existing ? existing.image : null;
+    }
+
+    const slide = document.getElementById('banner-preview-slide');
+    slide.style.cssText = 'cursor:default;' + (img
+        ? `background-image:linear-gradient(90deg,rgba(0,0,0,0.55),rgba(0,0,0,0.15)),url('${img}');background-size:cover;background-position:center;`
+        : `background:${t.gradient};`);
+    const tagEl = document.getElementById('banner-preview-tag');
+    tagEl.textContent = t.label;
+    tagEl.style.color = t.accent;
+    document.getElementById('banner-preview-title').textContent = title || 'Your banner title';
+    const subEl = document.getElementById('banner-preview-subtitle');
+    subEl.textContent = subtitle;
+    subEl.style.display = subtitle ? '' : 'none';
+}
+
+async function saveBanner() {
+    const title = document.getElementById('banner-title').value.trim();
+    if (!title) { showToast('Please enter a title'); return; }
+
+    const id = document.getElementById('banner-id').value;
+    const type = document.getElementById('banner-type').value;
+    const subtitle = document.getElementById('banner-subtitle').value.trim();
+    const linkType = document.getElementById('banner-linkType').value;
+    const linkVendorId = linkType === 'vendor' ? document.getElementById('banner-vendor').value : null;
+    const linkPage = linkType === 'page' ? document.getElementById('banner-page').value : null;
+
+    const banners = getBanners();
+    const existing = id ? banners.find(x => x.id === id) : null;
+
+    // Resolve image: new pick uploads to Storage; otherwise keep existing
+    let image = existing ? existing.image : null;
+    if (_bannerPendingImage !== undefined && _bannerPendingImage) {
+        const saveBtn = document.getElementById('banner-save-btn');
+        saveBtn.disabled = true; saveBtn.textContent = 'Uploading…';
+        image = await uploadImage(_bannerPendingImage, 'banners', id || ('b' + Date.now())) || _bannerPendingImage;
+        saveBtn.disabled = false; saveBtn.textContent = 'Save Banner';
+    }
+
+    if (existing) {
+        Object.assign(existing, { type, title, subtitle, image, linkType, linkVendorId, linkPage });
+    } else {
+        const maxOrder = banners.reduce((m, b) => Math.max(m, b.order || 0), -1);
+        banners.push({
+            id: 'b' + Date.now(), type, title, subtitle, image,
+            linkType, linkVendorId, linkPage, active: true, order: maxOrder + 1
+        });
+    }
+    saveBanners(banners);
+    closeModal('bannerModal');
+    renderAdminBanners();
+    renderHomeBanner();
+    showToast(existing ? 'Banner updated' : 'Banner added');
+}
+
+function deleteBanner(id) {
+    if (!confirm('Delete this banner? This cannot be undone.')) return;
+    saveBanners(getBanners().filter(b => b.id !== id));
+    renderAdminBanners();
+    renderHomeBanner();
+    showToast('Banner deleted');
+}
+
+function toggleBannerActive(id) {
+    const banners = getBanners();
+    const b = banners.find(x => x.id === id);
+    if (!b) return;
+    b.active = b.active === false;
+    saveBanners(banners);
+    renderAdminBanners();
+    renderHomeBanner();
+}
+
+function moveBanner(id, dir) {
+    const banners = getBanners().sort((a, b) => (a.order || 0) - (b.order || 0));
+    const idx = banners.findIndex(b => b.id === id);
+    const swap = idx + dir;
+    if (idx < 0 || swap < 0 || swap >= banners.length) return;
+    [banners[idx], banners[swap]] = [banners[swap], banners[idx]];
+    banners.forEach((b, i) => b.order = i); // renumber
+    saveBanners(banners);
+    renderAdminBanners();
+    renderHomeBanner();
+}
+
 function renderAdminPosts() {
     const posts = getAnnouncements();
     const el = document.getElementById('atab-posts');

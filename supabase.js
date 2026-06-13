@@ -21,8 +21,10 @@ const DB = {
     notifications: [],
     requests:      [],
     config: {
-        campus_star:   null,
-        order_counter: 0
+        campus_star:    null,
+        order_counter:  0,
+        admin_created:  false,
+        banners:        []
     }
 };
 
@@ -44,13 +46,16 @@ async function loadAllData() {
         DB.notifications = (notifications.data || []).map(r => ({ ...r.data, read: r.read }));
         DB.requests      = (requests.data      || []).map(r => r.data);
         (config.data || []).forEach(row => {
-            if (row.key === 'campus_star')   DB.config.campus_star   = row.value || null;
-            if (row.key === 'order_counter') DB.config.order_counter = parseInt(row.value) || 0;
+            if (row.key === 'campus_star')    DB.config.campus_star   = row.value || null;
+            if (row.key === 'order_counter')  DB.config.order_counter = parseInt(row.value) || 0;
+            if (row.key === 'admin_created')  DB.config.admin_created = row.value === 'true';
+            if (row.key === 'banners')        { try { DB.config.banners = JSON.parse(row.value || '[]') || []; } catch(e) { DB.config.banners = []; } }
         });
 
         // Seed 5 sample vendors on very first load (empty database)
         if (DB.vendors.length === 0) {
             await seedSampleVendors();
+            await seedDefaultBanners();
         }
 
         // Start realtime after data is in cache
@@ -89,6 +94,23 @@ async function seedSampleVendors() {
         read: false, data: welcomeNotif, created_at: new Date().toISOString()
     });
     DB.notifications.push(welcomeNotif);
+}
+
+// ── SEED DEFAULT HOMEPAGE BANNERS (first load only) ──
+// Gradient-only banners (no image needed) so the homepage looks alive
+// immediately. Admin can edit/delete/replace these from the Banners tab.
+async function seedDefaultBanners() {
+    if (!_supabase) return;
+    const defaults = [
+        { id: 'b_welcome', type: 'notice', title: 'Welcome to ACity Market',
+          subtitle: 'Your whole campus, in one marketplace', image: null,
+          linkType: 'none', linkVendorId: null, linkPage: null, active: true, order: 0 },
+        { id: 'b_browse', type: 'star', title: 'Shop top-rated campus vendors',
+          subtitle: 'Browse trending stores below', image: null,
+          linkType: 'none', linkVendorId: null, linkPage: null, active: true, order: 1 }
+    ];
+    DB.config.banners = defaults;
+    await syncConfig('banners', JSON.stringify(defaults)).catch(console.warn);
 }
 
 // ═══════════════════════════════════════════

@@ -62,6 +62,14 @@
     </div>
 
     <main>
+        <!-- Promo banner carousel (admin-managed) -->
+        <div class="section hidden" id="homeBannerSection" style="padding-top:4px;">
+            <div class="banner-carousel" ontouchstart="bannerTouchStart(event)" ontouchend="bannerTouchEnd(event)">
+                <div class="banner-track" id="bannerTrack"></div>
+            </div>
+            <div class="banner-dots" id="bannerDots"></div>
+        </div>
+
         <div class="filter-bar">
             <select class="filter-select" id="sortFilter" onchange="applyFilters()">
                 <option value="default">Sort: Default</option>
@@ -329,6 +337,7 @@
     <div style="display:flex;background:white;border-bottom:2px solid var(--border);position:sticky;top:0;z-index:40;">
         <button class="atab active" id="atab-btn-vendors" onclick="switchATab('vendors')">Vendors</button>
         <button class="atab" id="atab-btn-requests" onclick="switchATab('requests')">Requests <span id="adminReqBadge" class="hidden" style="background:var(--primary-red);color:white;font-size:10px;font-weight:700;padding:1px 5px;border-radius:20px;margin-left:3px;"></span></button>
+        <button class="atab" id="atab-btn-banners" onclick="switchATab('banners')">Banners</button>
         <button class="atab" id="atab-btn-posts" onclick="switchATab('posts')">Posts</button>
         <button class="atab" id="atab-btn-analytics" onclick="switchATab('analytics')">Analytics</button>
         <button class="atab" id="atab-btn-settings" onclick="switchATab('settings')">Settings</button>
@@ -336,6 +345,7 @@
     <main>
         <div id="atab-vendors" style="padding-top:12px;"></div>
         <div id="atab-requests" class="hidden" style="padding-top:12px;"></div>
+        <div id="atab-banners" class="hidden" style="padding-top:12px;"></div>
         <div id="atab-posts" class="hidden" style="padding-top:12px;"></div>
         <div id="atab-analytics" class="hidden" style="padding-top:12px;"></div>
         <div id="atab-settings" class="hidden" style="padding-top:12px;"></div>
@@ -1069,8 +1079,8 @@
         <h2>Admin Login</h2>
         <p style="font-size:13px;color:var(--text-muted);margin-bottom:16px;">Restricted access — authorised personnel only.</p>
         <div class="form-group">
-            <label>Username</label>
-            <input type="text" id="adminUser" placeholder="Username" onkeydown="if(event.key==='Enter') submitAdminLogin()" maxlength="30">
+            <label>Email</label>
+            <input type="email" id="adminUser" placeholder="Admin email address" onkeydown="if(event.key==='Enter') submitAdminLogin()" maxlength="100">
         </div>
         <div class="form-group">
             <label>Password</label>
@@ -1078,6 +1088,7 @@
         </div>
         <button class="btn-primary" onclick="submitAdminLogin()">Enter Admin Panel</button>
         <button class="btn-secondary" onclick="closeModal('adminLoginModal')">Cancel</button>
+        <p style="text-align:center;margin-top:12px;font-size:13px;color:var(--text-muted);">First time? <a href="#" style="color:var(--primary-blue);text-decoration:none;font-weight:600;" onclick="event.preventDefault();closeModal('adminLoginModal');document.getElementById('adminSetupModal').classList.remove('hidden');">Set up admin account</a></p>
     </div>
 </div>
 
@@ -1088,8 +1099,8 @@
         <h2>Set Up Admin Account</h2>
         <p style="font-size:13px;color:var(--text-muted);margin-bottom:16px;">Create the admin credentials for this installation. You can change these later from the admin settings.</p>
         <div class="form-group">
-            <label>Admin Username</label>
-            <input type="text" id="as-username" placeholder="Choose a username" maxlength="30">
+            <label>Admin Email</label>
+            <input type="email" id="as-username" placeholder="admin@example.com" maxlength="100">
         </div>
         <div class="form-group">
             <label>Password</label>
@@ -1101,6 +1112,72 @@
         </div>
         <button class="btn-primary" onclick="submitAdminSetup()">Create Admin Account</button>
         <button class="btn-secondary" onclick="closeModal('adminSetupModal')">Cancel</button>
+    </div>
+</div>
+
+<!-- ═══════════════ MODAL: BANNER EDITOR (admin) ═══════════════ -->
+<div class="modal-overlay hidden" id="bannerModal">
+    <div class="modal">
+        <div class="modal-handle"></div>
+        <h2 id="bannerModalTitle">Add Banner</h2>
+        <input type="hidden" id="banner-id">
+        <div class="form-group">
+            <label>Banner type</label>
+            <select id="banner-type" onchange="updateBannerPreview()">
+                <option value="deal">Hot Deal (red)</option>
+                <option value="new">Just Dropped (blue)</option>
+                <option value="star">Campus Star (gold)</option>
+                <option value="notice">Announcement (green)</option>
+            </select>
+        </div>
+        <div class="form-group">
+            <label>Title</label>
+            <input type="text" id="banner-title" placeholder="e.g. 20% off all snacks this week" maxlength="60" oninput="updateBannerPreview()">
+        </div>
+        <div class="form-group">
+            <label>Subtitle <span style="color:var(--text-muted);font-weight:400;">(optional)</span></label>
+            <input type="text" id="banner-subtitle" placeholder="e.g. Use code SNACK20 at checkout" maxlength="80" oninput="updateBannerPreview()">
+        </div>
+        <div class="form-group">
+            <label>Background image <span style="color:var(--text-muted);font-weight:400;">(optional — leave blank for colour)</span></label>
+            <input type="file" id="banner-image" accept="image/*" onchange="onBannerImagePick(this)">
+            <div id="banner-image-note" style="font-size:12px;color:var(--text-muted);margin-top:6px;"></div>
+        </div>
+        <div class="form-group">
+            <label>When tapped, go to…</label>
+            <select id="banner-linkType" onchange="onBannerLinkTypeChange()">
+                <option value="none">Nothing (just a banner)</option>
+                <option value="vendor">A vendor's store</option>
+                <option value="page">A page in the app</option>
+            </select>
+        </div>
+        <div class="form-group hidden" id="banner-vendor-row">
+            <label>Vendor</label>
+            <select id="banner-vendor"></select>
+        </div>
+        <div class="form-group hidden" id="banner-page-row">
+            <label>Page</label>
+            <select id="banner-page">
+                <option value="announcements">Posts &amp; Opportunities</option>
+                <option value="home">Home</option>
+            </select>
+        </div>
+
+        <label style="font-size:13px;color:var(--text-muted);font-weight:600;">Live preview</label>
+        <div class="banner-carousel" style="margin:6px 0 16px;">
+            <div class="banner-track">
+                <div class="banner-slide" id="banner-preview-slide" style="cursor:default;">
+                    <div class="banner-overlay">
+                        <span class="banner-tag" id="banner-preview-tag"></span>
+                        <div class="banner-title" id="banner-preview-title"></div>
+                        <div class="banner-subtitle" id="banner-preview-subtitle"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <button class="btn-primary" id="banner-save-btn" onclick="saveBanner()">Save Banner</button>
+        <button class="btn-secondary" onclick="closeModal('bannerModal')">Cancel</button>
     </div>
 </div>
 
