@@ -78,6 +78,14 @@
             <div class="vendor-grid" id="sponsoredVendorGrid"></div>
         </div>
 
+        <!-- V3: Flash Deals Strip — active limited-time deals with countdown timers -->
+        <div class="section hidden" id="flashDealsSection">
+            <div class="section-header">
+                <div class="section-title">⚡ Flash Deals</div>
+            </div>
+            <div class="flash-deals-strip" id="flashDealsStrip"></div>
+        </div>
+
         <!-- Trending Products (horizontal scroll) -->
         <div class="section hidden" id="trendingProductsSection">
             <div class="section-header">
@@ -181,6 +189,7 @@
     <div class="page-header">
         <button class="back-btn" onclick="goBack()">←</button>
         <span class="page-title" id="productPageTitle">Product</span>
+        <button onclick="shareCurrentProduct()" style="margin-left:auto;background:none;border:none;color:var(--primary-blue);font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;padding:4px 8px;" title="Share this product">⬆ Share</button>
     </div>
     <main id="productPageContent" style="padding-bottom:80px;"></main>
 </div>
@@ -287,7 +296,8 @@
             <!-- Deals tab -->
             <div id="vtab-deals" class="hidden">
                 <div style="padding:16px;">
-                    <div id="vd-promo-section"></div>
+                    <div id="vd-flash-section"></div>
+                    <div id="vd-promo-section" style="margin-top:16px;"></div>
                     <div id="vd-bundle-section" style="margin-top:16px;"></div>
                 </div>
             </div>
@@ -678,6 +688,53 @@
         </div>
         <button class="btn-primary" onclick="saveBundleDeal()">Save Bundle</button>
         <button class="btn-secondary" onclick="closeModal('bundleModal')">Cancel</button>
+    </div>
+</div>
+
+<!-- ═══════════════ MODAL: FLASH DEAL ═══════════════ -->
+<div class="modal-overlay hidden" id="flashDealModal">
+    <div class="modal">
+        <div class="modal-handle"></div>
+        <h2>⚡ Create Flash Deal</h2>
+        <p style="font-size:13px;color:var(--text-muted);margin-bottom:16px;">Set a limited-time discount on a product — visible to all shoppers on the homepage.</p>
+        <div class="form-group">
+            <label>Product *</label>
+            <select id="fd-product" style="width:100%;padding:10px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:14px;font-family:inherit;background:var(--white);color:var(--text-dark);outline:none;"></select>
+        </div>
+        <div class="form-group">
+            <label>Discount % *</label>
+            <input type="number" id="fd-discount" placeholder="e.g. 25" min="5" max="90">
+        </div>
+        <div class="form-group">
+            <label>Duration *</label>
+            <select id="fd-duration" style="width:100%;padding:10px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:14px;font-family:inherit;background:var(--white);color:var(--text-dark);outline:none;">
+                <option value="1">1 hour</option>
+                <option value="2">2 hours</option>
+                <option value="4">4 hours</option>
+                <option value="6">6 hours</option>
+                <option value="12">12 hours</option>
+                <option value="24" selected>24 hours</option>
+            </select>
+        </div>
+        <button class="btn-primary" onclick="saveFlashDeal()">Launch Deal ⚡</button>
+        <button class="btn-secondary" onclick="closeModal('flashDealModal')">Cancel</button>
+    </div>
+</div>
+
+<!-- ═══════════════ MODAL: SHARE / QR ═══════════════ -->
+<div class="modal-overlay hidden" id="shareModal">
+    <div class="modal">
+        <div class="modal-handle"></div>
+        <h2 id="shareModalTitle">Share</h2>
+        <div style="text-align:center;margin:14px 0 16px;">
+            <img id="shareQrImg" src="" alt="QR Code" style="width:160px;height:160px;border-radius:12px;border:1.5px solid var(--border);">
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;">
+            <input type="text" id="shareUrlInput" readonly style="flex:1;padding:10px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:12px;background:var(--bg-light);color:var(--text-muted);outline:none;font-family:inherit;">
+            <button onclick="copyShareUrl()" style="background:var(--primary-blue);color:white;border:none;padding:10px 14px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;flex-shrink:0;">Copy</button>
+        </div>
+        <button id="nativeShareBtn" class="btn-primary hidden" onclick="nativeShare()">Share via…</button>
+        <button class="btn-secondary" onclick="closeModal('shareModal')">Done</button>
     </div>
 </div>
 

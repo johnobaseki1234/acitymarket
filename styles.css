@@ -571,12 +571,33 @@
         }
         .vendor-img {
             width: 100%;
-            height: 110px;
+            height: 140px;
             display: flex;
             align-items: center;
             justify-content: center;
             font-size: 40px;
             background: #f3f4f6;
+            position: relative;
+            overflow: hidden;
+        }
+        /* V4: price overlay gradient at bottom of vendor card image */
+        .vendor-img-price-overlay {
+            position: absolute;
+            bottom: 0; left: 0; right: 0;
+            background: linear-gradient(to top, rgba(0,0,0,0.55) 0%, transparent 100%);
+            padding: 20px 8px 6px;
+            display: flex;
+            justify-content: flex-end;
+            align-items: flex-end;
+            pointer-events: none;
+        }
+        .vendor-img-price-overlay .price-pill {
+            background: rgba(255,255,255,0.93);
+            color: var(--primary-blue);
+            font-size: 11px;
+            font-weight: 700;
+            padding: 2px 8px;
+            border-radius: 20px;
         }
         .vendor-card-body { padding: 10px; }
         .vendor-name {
@@ -711,6 +732,92 @@
         .trending-product-price { font-size: 13px; font-weight: 700; color: var(--primary-blue); }
         body.dark-mode .trending-product-card { background: var(--white); }
         body.dark-mode .trending-product-img { background: linear-gradient(135deg, #111e30, #1a1d3a); }
+
+        /* V4: price badge overlaid on product card image */
+        .product-price-badge {
+            position: absolute;
+            bottom: 6px; right: 6px;
+            background: var(--primary-blue);
+            color: white;
+            font-size: 11px;
+            font-weight: 700;
+            padding: 2px 8px;
+            border-radius: 20px;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.25);
+            z-index: 2;
+            pointer-events: none;
+        }
+
+        /* V3: Flash deals horizontal strip */
+        .flash-deals-strip {
+            display: flex;
+            gap: 10px;
+            overflow-x: auto;
+            padding: 4px 16px 12px;
+            scrollbar-width: none;
+        }
+        .flash-deals-strip::-webkit-scrollbar { display: none; }
+        .flash-deal-card {
+            flex-shrink: 0;
+            width: 140px;
+            background: white;
+            border-radius: var(--radius);
+            overflow: hidden;
+            box-shadow: var(--shadow);
+            cursor: pointer;
+            transition: transform 0.15s;
+            position: relative;
+        }
+        .flash-deal-card:hover  { transform: translateY(-2px); box-shadow: var(--shadow-md); }
+        .flash-deal-card:active { transform: scale(0.97); opacity: 0.9; }
+        .flash-deal-img {
+            width: 100%;
+            height: 90px;
+            background: linear-gradient(135deg, #fce4ec, #fff3e0);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 30px;
+            position: relative;
+            overflow: hidden;
+        }
+        .flash-deal-img img { width:100%; height:100%; object-fit:cover; }
+        .flash-deal-pct {
+            position: absolute;
+            top: 5px; left: 5px;
+            background: #dc2626;
+            color: white;
+            font-size: 10px;
+            font-weight: 800;
+            padding: 2px 6px;
+            border-radius: 6px;
+            letter-spacing: 0.3px;
+        }
+        .flash-deal-body { padding: 7px 8px; }
+        .flash-deal-name {
+            font-size: 11px; font-weight: 600;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+            margin-bottom: 1px; color: var(--text-dark);
+        }
+        .flash-deal-vendor {
+            font-size: 10px; color: var(--text-muted);
+            margin-bottom: 4px;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        }
+        .flash-deal-prices { display: flex; align-items: center; gap: 4px; margin-bottom: 4px; }
+        .flash-deal-orig  { font-size: 10px; color: var(--text-muted); text-decoration: line-through; }
+        .flash-deal-new   { font-size: 12px; font-weight: 700; color: #dc2626; }
+        .flash-deal-timer {
+            font-size: 10px; font-weight: 700; color: #dc2626;
+            background: #fef2f2;
+            border-radius: 6px;
+            padding: 2px 6px;
+            display: inline-block;
+            font-variant-numeric: tabular-nums;
+        }
+        body.dark-mode .flash-deal-card    { background: var(--white); }
+        body.dark-mode .flash-deal-img     { background: linear-gradient(135deg, #2d1116, #2d1f0d); }
+        body.dark-mode .flash-deal-timer   { background: #3f1f1f; color: #f87171; }
 
         /* ── SEARCH RESULTS CATEGORIZED ── */
         .search-category-header {

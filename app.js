@@ -194,6 +194,20 @@ async function init() {
         setTimeout(() => openAdminLogin(), 400);
     }
 
+    // E2: Deep-link support — #vendor=ID  or  #product=VID/PID
+    const _dlHash = window.location.hash;
+    if (_dlHash.startsWith('#vendor=')) {
+        const _vid = decodeURIComponent(_dlHash.slice('#vendor='.length));
+        window.location.hash = '';
+        setTimeout(() => openVendor(_vid), 400);
+    } else if (_dlHash.startsWith('#product=')) {
+        const _parts = decodeURIComponent(_dlHash.slice('#product='.length)).split('/');
+        if (_parts.length >= 2) {
+            window.location.hash = '';
+            setTimeout(() => openProduct(_parts[0], _parts[1]), 400);
+        }
+    }
+
     // SP3.2 — scroll listener guarded so it only attaches once
     // (prevents duplicate listeners if init() is ever called again, e.g. after data restore)
     if (!window._acmScrollListenerAttached) {
@@ -551,6 +565,9 @@ function renderHomePage() {
     // Render Trending Products (horizontal scroll)
     renderTrendingProducts(vendors, orderMap);
 
+    // V3: Flash deals strip
+    renderFlashDealsStrip();
+
     // Render Trending Vendors
     const featuredCountEl = document.getElementById('featuredCount');
     if (featuredCountEl) featuredCountEl.textContent = featured.length;
@@ -604,8 +621,9 @@ function renderTrendingProducts(vendors, orderMap) {
     if (countEl) countEl.textContent = top.length;
 
     scroll.innerHTML = top.map(({ product: p, vendor: v }) => {
-        const img = p.image
-            ? `<img src="${p.image}" alt="${escHtml(p.name)}" onerror="this.style.display='none'">`
+        const photos = getProductPhotos(p);
+        const img = photos.length
+            ? `<img src="${photos[0]}" alt="${escHtml(p.name)}" onerror="this.style.display='none'">`
             : `<span style="font-size:32px;">${v.emoji || '🛍️'}</span>`;
         return `<div class="trending-product-card" onclick="openVendor('${v.id}')">
             <div class="trending-product-img">${img}</div>
@@ -726,10 +744,10 @@ function vendorCardHTML(v, campusStarId = null) {
         : '';
     const hasPromo = (v.promoCodes || []).some(c => new Date(c.expiry) >= new Date());
     const promoBadgeHTML = hasPromo ? '<div class="promo-vendor-badge">PROMO</div>' : '';
-    // SU1.3 — show lowest product price on card so students know if it fits their budget
+    // SU1.3 — show lowest product price as an image overlay (V4 image-forward)
     const prices = (v.products || []).filter(p => !p.isConsult && p.price > 0).map(p => p.price);
-    const priceTag = prices.length
-        ? `<span style="font-size:11px;color:var(--text-muted);">From GH₵${Math.min(...prices)}</span>`
+    const imgPriceOverlay = prices.length
+        ? `<div class="vendor-img-price-overlay"><span class="price-pill">From GH₵${Math.min(...prices)}</span></div>`
         : '';
     // Status badge top-right of image
     const statusStyle = {
@@ -756,7 +774,10 @@ function vendorCardHTML(v, campusStarId = null) {
             ${badgeHTML}
             ${statusTopBadge}
             ${promoBadgeHTML}
-            <div class="vendor-img" style="${v.logo ? 'padding:0;overflow:hidden;' : ''}">${imgContent}</div>
+            <div class="vendor-img" style="${v.logo ? 'padding:0;' : ''}">
+                ${imgContent}
+                ${imgPriceOverlay}
+            </div>
             <div class="vendor-card-body">
                 <div class="vendor-name">${escHtml(v.name)}</div>
                 <div class="vendor-student">${escHtml(v.studentName || '')}</div>
@@ -767,7 +788,6 @@ function vendorCardHTML(v, campusStarId = null) {
                             ? `<span class="stars">${stars}</span><span class="review-count">${v.rating} (${v.reviews})</span>`
                             : `<span style="font-size:11px;color:var(--text-muted);font-style:italic;">No reviews yet</span>`}
                     </div>
-                    ${priceTag}
                 </div>
                 ${cardTrustBadges}
             </div>
@@ -826,10 +846,11 @@ function openVendor(vendorId) {
                     <span class="vendor-tag">${availLabel[v.availability] || 'Always Available'}</span>
                 </div>
                 ${(() => { const tb = getVendorTrustBadges(v); return tb.length ? `<div style="display:flex;gap:5px;flex-wrap:wrap;margin-top:8px;">${tb.map(b=>`<span class="trust-badge ${b.cls}" style="background:rgba(255,255,255,0.18);color:rgba(255,255,255,0.95);border-color:rgba(255,255,255,0.25);">${b.icon} ${b.label}</span>`).join('')}</div>` : ''; })()}
-                <div style="margin-top:10px;">
+                <div style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
                     <button id="followBtn" class="follow-btn ${isFollowing(v.id) ? 'following' : ''}" onclick="toggleFollow('${v.id}')">
                         ${isFollowing(v.id) ? '✓ Following' : '+ Follow'}
                     </button>
+                    <button onclick="shareVendor('${v.id}')" style="background:rgba(255,255,255,0.18);color:white;border:1.5px solid rgba(255,255,255,0.4);padding:7px 14px;border-radius:20px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;display:inline-flex;align-items:center;gap:5px;">⬆ Share</button>
                 </div>
             </div>
         </div>
@@ -3877,12 +3898,17 @@ function productCardHTML(v, p) {
     const stockHTML = !isConsult
         ? `<div class="product-stock ${lowStock ? 'low-stock-text' : ''}">${oos ? 'Out of stock' : lowStock ? `⚠️ Only ${p.stock} left!` : `${p.stock} in stock`}</div>`
         : '';
+    // V4: price badge overlaid on product image (only when in stock and not consult)
+    const imgPriceBadge = (!isConsult && !oos && p.price > 0)
+        ? `<div class="product-price-badge">GH₵${p.price}</div>`
+        : '';
     return `
     <div class="product-card" onclick="openProduct('${v.id}','${p.id}')">
         <div class="product-img" style="${photos.length ? 'padding:0;overflow:hidden;' : ''}">
             ${imgContent}
             ${oos ? '<div class="out-of-stock-overlay">OUT OF STOCK</div>' : ''}
             ${p.isBoosted ? '<div class="boost-badge">⭐ Featured</div>' : ''}
+            ${imgPriceBadge}
             ${wishBtn}
         </div>
         <div class="product-body">
@@ -4247,6 +4273,36 @@ function renderDealsTab() {
     const bundles = v.bundles || [];
     const products = (v.products || []).filter(p => !p.isConsult);
 
+    // Flash deals section (E4)
+    const flashEl = document.getElementById('vd-flash-section');
+    if (flashEl) {
+        const now = Date.now();
+        const activeDeals = (v.flashDeals || []).filter(d => d.expiresAt > now);
+        flashEl.innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+            <div style="font-size:15px;font-weight:700;color:var(--text-dark);">⚡ Flash Deals</div>
+            ${products.length ? `<button onclick="openFlashDealModal()" style="background:#dc2626;color:white;border:none;padding:6px 12px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;">+ New Deal</button>` : ''}
+        </div>
+        ${!products.length ? '<p style="font-size:13px;color:var(--text-muted);">Add products to your store to create flash deals.</p>' :
+          !activeDeals.length ? '<p style="font-size:13px;color:var(--text-muted);">No active flash deals. Launch one to drive urgency and boost sales.</p>' :
+          activeDeals.map(d => {
+              const p = products.find(x => x.id === d.productId);
+              if (!p) return '';
+              const discounted = Math.round(p.price * (1 - d.discountPct / 100));
+              const remaining = d.expiresAt - now;
+              return `
+              <div style="background:var(--bg-light);border:1px solid var(--border);border-radius:10px;padding:10px 14px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;">
+                  <div>
+                      <div style="font-size:14px;font-weight:700;color:var(--text-dark);">${escHtml(p.name)}</div>
+                      <div style="font-size:12px;color:var(--text-muted);margin-top:2px;">GH₵${p.price} → <strong style="color:#dc2626;">GH₵${discounted}</strong> (${d.discountPct}% off)</div>
+                      <div style="margin-top:4px;"><span class="flash-deal-timer" data-flash-expires="${d.expiresAt}">${formatCountdown(remaining)}</span></div>
+                  </div>
+                  <button onclick="deleteFlashDeal('${d.id}')" style="font-size:12px;color:var(--primary-red);background:none;border:none;cursor:pointer;font-weight:600;flex-shrink:0;">Remove</button>
+              </div>`;
+          }).filter(Boolean).join('')
+        }`;
+    }
+
     // Promo codes section
     const promoEl = document.getElementById('vd-promo-section');
     if (promoEl) {
@@ -4415,6 +4471,207 @@ function deleteBundleDeal(bundleId) {
     state.loggedVendor = vendors[vIdx];
     renderDealsTab();
     showToast('Bundle removed');
+}
+
+// ═══════════════════════════════════════════
+// FLASH DEALS (E4 + V3)
+// ═══════════════════════════════════════════
+
+function openFlashDealModal() {
+    const v = state.loggedVendor;
+    if (!v) return;
+    const products = (v.products || []).filter(p => !p.isConsult && p.price > 0);
+    if (!products.length) { showToast('Add priced products first'); return; }
+    const sel = document.getElementById('fd-product');
+    sel.innerHTML = products.map(p => `<option value="${p.id}">${escHtml(p.name)} — GH₵${p.price}</option>`).join('');
+    document.getElementById('fd-discount').value = '';
+    document.getElementById('fd-duration').value = '24';
+    document.getElementById('flashDealModal').classList.remove('hidden');
+}
+
+function saveFlashDeal() {
+    const v = state.loggedVendor;
+    if (!v) return;
+    const productId = document.getElementById('fd-product').value;
+    const discountPct = parseInt(document.getElementById('fd-discount').value, 10);
+    const hours = parseInt(document.getElementById('fd-duration').value, 10);
+    if (!productId) { showToast('Pick a product'); return; }
+    if (!discountPct || discountPct < 5 || discountPct > 90) { showToast('Discount must be 5–90%'); return; }
+    const vendors = getVendors();
+    const vIdx = vendors.findIndex(x => x.id === v.id);
+    if (vIdx === -1) return;
+    if (!vendors[vIdx].flashDeals) vendors[vIdx].flashDeals = [];
+    // Only one active deal per product at a time
+    vendors[vIdx].flashDeals = vendors[vIdx].flashDeals.filter(d => d.productId !== productId || d.expiresAt > Date.now());
+    const deal = { id: 'fd_' + Date.now(), productId, discountPct, expiresAt: Date.now() + hours * 3600000 };
+    vendors[vIdx].flashDeals.push(deal);
+    saveVendors(vendors);
+    state.loggedVendor = vendors[vIdx];
+    closeModal('flashDealModal');
+    renderDealsTab();
+    startFlashCountdowns();
+    renderFlashDealsStrip();
+    const p = (vendors[vIdx].products || []).find(x => x.id === productId);
+    const discounted = Math.round((p?.price || 0) * (1 - discountPct / 100));
+    pushNotification('⚡', `Flash Deal: ${p?.name || 'Product'} at ${v.name}`,
+        `${discountPct}% off! Only GH₵${discounted} for the next ${hours}h. Grab it now!`, null, null);
+    showToast('Flash deal launched!');
+}
+
+function deleteFlashDeal(dealId) {
+    const vendors = getVendors();
+    const vIdx = vendors.findIndex(x => x.id === state.loggedVendor.id);
+    if (vIdx === -1) return;
+    vendors[vIdx].flashDeals = (vendors[vIdx].flashDeals || []).filter(x => x.id !== dealId);
+    saveVendors(vendors);
+    state.loggedVendor = vendors[vIdx];
+    renderDealsTab();
+    renderFlashDealsStrip();
+    showToast('Deal removed');
+}
+
+// V3: Flash deals strip on homepage
+function renderFlashDealsStrip() {
+    const sec   = document.getElementById('flashDealsSection');
+    const strip = document.getElementById('flashDealsStrip');
+    if (!sec || !strip) return;
+
+    const now = Date.now();
+    const activeDeals = [];
+    getPublicVendors().forEach(v => {
+        (v.flashDeals || []).forEach(d => {
+            if (d.expiresAt <= now) return;
+            const p = (v.products || []).find(x => x.id === d.productId);
+            if (!p || p.isConsult || p.stock === 0) return;
+            activeDeals.push({ deal: d, product: p, vendor: v });
+        });
+    });
+
+    activeDeals.sort((a, b) => a.deal.expiresAt - b.deal.expiresAt);
+
+    if (!activeDeals.length) { sec.classList.add('hidden'); stopFlashCountdowns(); return; }
+    sec.classList.remove('hidden');
+
+    strip.innerHTML = activeDeals.map(({ deal: d, product: p, vendor: v }) => {
+        const discounted = Math.round(p.price * (1 - d.discountPct / 100));
+        const photos = getProductPhotos(p);
+        const imgHTML = photos.length
+            ? `<img src="${photos[0]}" alt="${escHtml(p.name)}" onerror="this.style.display='none'">`
+            : `<span style="font-size:28px;">${v.emoji || '🏷️'}</span>`;
+        const remaining = d.expiresAt - now;
+        return `
+        <div class="flash-deal-card" onclick="openVendor('${v.id}')">
+            <div class="flash-deal-img">
+                ${imgHTML}
+                <div class="flash-deal-pct">-${d.discountPct}%</div>
+            </div>
+            <div class="flash-deal-body">
+                <div class="flash-deal-name">${escHtml(p.name)}</div>
+                <div class="flash-deal-vendor">${escHtml(v.name)}</div>
+                <div class="flash-deal-prices">
+                    <span class="flash-deal-orig">GH₵${p.price}</span>
+                    <span class="flash-deal-new">GH₵${discounted}</span>
+                </div>
+                <span class="flash-deal-timer" data-flash-expires="${d.expiresAt}">${formatCountdown(remaining)}</span>
+            </div>
+        </div>`;
+    }).join('');
+
+    startFlashCountdowns();
+}
+
+let _flashCountdownInterval = null;
+
+function startFlashCountdowns() {
+    stopFlashCountdowns();
+    _flashCountdownInterval = setInterval(() => {
+        const now = Date.now();
+        document.querySelectorAll('[data-flash-expires]').forEach(el => {
+            const exp = parseInt(el.dataset.flashExpires, 10);
+            const rem = exp - now;
+            if (rem <= 0) {
+                el.textContent = 'Ended';
+                el.style.opacity = '0.5';
+                const card = el.closest('.flash-deal-card');
+                if (card) card.style.opacity = '0.5';
+            } else {
+                el.textContent = formatCountdown(rem);
+            }
+        });
+    }, 1000);
+}
+
+function stopFlashCountdowns() {
+    if (_flashCountdownInterval) { clearInterval(_flashCountdownInterval); _flashCountdownInterval = null; }
+}
+
+function formatCountdown(ms) {
+    if (ms <= 0) return 'Ended';
+    const h = Math.floor(ms / 3600000);
+    const m = Math.floor((ms % 3600000) / 60000);
+    const s = Math.floor((ms % 60000) / 1000);
+    if (h > 0) return `${h}h ${String(m).padStart(2,'0')}m ${String(s).padStart(2,'0')}s`;
+    if (m > 0) return `${String(m).padStart(2,'0')}m ${String(s).padStart(2,'0')}s`;
+    return `${String(s).padStart(2,'0')}s`;
+}
+
+// ═══════════════════════════════════════════
+// SHARE / QR CODES (E2)
+// ═══════════════════════════════════════════
+
+let _shareUrl   = '';
+let _shareTitle = '';
+
+function shareVendor(vendorId) {
+    const v = getVendors().find(x => x.id === vendorId);
+    if (!v) return;
+    const url = `${location.origin}${location.pathname}#vendor=${encodeURIComponent(vendorId)}`;
+    showShareModal(url, v.name);
+}
+
+function shareProduct(vendorId, productId) {
+    const v = getVendors().find(x => x.id === vendorId);
+    if (!v) return;
+    const p = (v.products || []).find(x => x.id === productId);
+    if (!p) return;
+    const url = `${location.origin}${location.pathname}#product=${encodeURIComponent(vendorId)}/${encodeURIComponent(productId)}`;
+    showShareModal(url, `${p.name} — ${v.name}`);
+}
+
+function shareCurrentProduct() {
+    shareProduct(state.currentProductVendorId, state.currentProductId);
+}
+
+function showShareModal(url, title) {
+    _shareUrl   = url;
+    _shareTitle = title;
+    document.getElementById('shareModalTitle').textContent = title;
+    document.getElementById('shareUrlInput').value = url;
+    const qrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${encodeURIComponent(url)}&ecc=M&bgcolor=ffffff&color=1e3a5f`;
+    document.getElementById('shareQrImg').src = qrSrc;
+    const nativeBtn = document.getElementById('nativeShareBtn');
+    nativeBtn.classList.toggle('hidden', !navigator.share);
+    document.getElementById('shareModal').classList.remove('hidden');
+}
+
+function copyShareUrl() {
+    if (navigator.clipboard) {
+        navigator.clipboard.writeText(_shareUrl).then(() => showToast('Link copied!')).catch(() => _fallbackCopy());
+    } else {
+        _fallbackCopy();
+    }
+}
+
+function _fallbackCopy() {
+    const input = document.getElementById('shareUrlInput');
+    input.select();
+    try { document.execCommand('copy'); showToast('Link copied!'); } catch(e) { showToast('Copy the link above'); }
+}
+
+function nativeShare() {
+    if (navigator.share) {
+        navigator.share({ title: _shareTitle, url: _shareUrl }).catch(() => {});
+    }
 }
 
 function getBundlesForProduct(vendorId, productId) {
